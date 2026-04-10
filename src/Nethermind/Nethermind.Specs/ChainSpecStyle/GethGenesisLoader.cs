@@ -181,13 +181,13 @@ public class GethGenesisLoader(IJsonSerializer serializer) : IChainSpecLoader
             Eip7939TransitionTimestamp = config.OsakaTime,
             Eip7951TransitionTimestamp = config.OsakaTime,
 
-            Eip7708TransitionTimestamp = config.AmsterdamTime,
-            Eip7778TransitionTimestamp = config.AmsterdamTime,
-            Eip7843TransitionTimestamp = config.AmsterdamTime,
-            Eip7928TransitionTimestamp = config.AmsterdamTime,
-            Eip7954TransitionTimestamp = config.AmsterdamTime,
-            Eip8024TransitionTimestamp = config.AmsterdamTime,
-            Eip8037TransitionTimestamp = config.AmsterdamTime,
+            //Eip7708TransitionTimestamp = config.AmsterdamTime,
+            //Eip7778TransitionTimestamp = config.AmsterdamTime,
+            //Eip7843TransitionTimestamp = config.AmsterdamTime,
+            //Eip7928TransitionTimestamp = config.AmsterdamTime,
+            //Eip7954TransitionTimestamp = config.AmsterdamTime,
+            //Eip8024TransitionTimestamp = config.AmsterdamTime,
+            //Eip8037TransitionTimestamp = config.AmsterdamTime,
 
             BlobSchedule = blobSchedule
         };
