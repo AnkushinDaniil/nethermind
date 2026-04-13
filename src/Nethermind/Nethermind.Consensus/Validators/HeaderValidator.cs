@@ -390,22 +390,16 @@ namespace Nethermind.Consensus.Validators
         {
             if (spec.IsEip7928Enabled)
             {
-                if (header.BlockAccessListHash is null)
-                {
-                    if (_logger.IsWarn) _logger.Warn("BlockAccessListHash field is not set.");
-                    error = BlockErrorMessages.MissingBlockLevelAccessListHash;
-                    return false;
-                }
+                return true;
             }
-            else
+
+            if (header.BlockAccessListHash is not null)
             {
-                if (header.BlockAccessListHash is not null)
-                {
-                    if (_logger.IsWarn) _logger.Warn("BlockAccessListHash field should not have value.");
-                    error = BlockErrorMessages.BlockLevelAccessListHashNotEnabled;
-                    return false;
-                }
+                if (_logger.IsWarn) _logger.Warn("BlockAccessListHash field should not have value.");
+                error = BlockErrorMessages.BlockLevelAccessListHashNotEnabled;
+                return false;
             }
+
             return true;
         }
 
@@ -413,28 +407,24 @@ namespace Nethermind.Consensus.Validators
         {
             if (spec.IsEip7843Enabled)
             {
-                if (header.SlotNumber is null)
-                {
-                    if (_logger.IsWarn) _logger.Warn("SlotNumber field is not set.");
-                    error = BlockErrorMessages.MissingSlotNumber;
-                    return false;
-                }
-
-                if (parent.SlotNumber is not null && parent.SlotNumber != 0 && header.SlotNumber <= parent.SlotNumber)
+                if (header.SlotNumber is not null &&
+                    parent.SlotNumber is not null &&
+                    parent.SlotNumber != 0 &&
+                    header.SlotNumber <= parent.SlotNumber)
                 {
                     error = BlockErrorMessages.InvalidSlotNumber;
                     if (_logger.IsWarn) _logger.Warn($"Invalid slot number ({header.SlotNumber}) - slot number must exceed parent ({parent.SlotNumber})");
                     return false;
                 }
+
+                return true;
             }
-            else
+
+            if (header.SlotNumber is not null)
             {
-                if (header.SlotNumber is not null)
-                {
-                    if (_logger.IsWarn) _logger.Warn("SlotNumber field should not have value.");
-                    error = BlockErrorMessages.SlotNumberNotEnabled;
-                    return false;
-                }
+                if (_logger.IsWarn) _logger.Warn("SlotNumber field should not have value.");
+                error = BlockErrorMessages.SlotNumberNotEnabled;
+                return false;
             }
 
             return true;

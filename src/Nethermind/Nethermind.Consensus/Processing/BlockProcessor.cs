@@ -59,7 +59,10 @@ public partial class BlockProcessor(
 
         if (_balBuilder is not null)
         {
-            bool balsEnabled = spec.BlockLevelAccessListsEnabled;
+            bool balsEnabled = spec.BlockLevelAccessListsEnabled &&
+                (suggestedBlock.Header.BlockAccessListHash is not null ||
+                 suggestedBlock.BlockAccessList is not null ||
+                 suggestedBlock.Header.SlotNumber is not null);
             _balBuilder.TracingEnabled = balsEnabled;
             if (balsEnabled)
             {

@@ -954,7 +954,8 @@
       "nethermind.merge.plugin": {
         "type": "Project",
         "dependencies": {
-          "Nethermind.Api": "[1.37.0-unstable, )"
+          "Nethermind.Api": "[1.37.0-unstable, )",
+          "Nethermind.Stateless.Executor": "[1.37.0-unstable, )"
         }
       },
       "nethermind.merkleization": {
@@ -1130,6 +1131,12 @@
           "System.IO.Hashing": "[10.0.5, )"
         }
       },
+      "nethermind.stateless.executor": {
+        "type": "Project",
+        "dependencies": {
+          "Nethermind.Consensus": "[1.37.0-unstable, )"
+        }
+      },
       "nethermind.synchronization": {
         "type": "Project",
         "dependencies": {
@@ -1170,7 +1177,6 @@
       "nethermind.txpool": {
         "type": "Project",
         "dependencies": {
-          "ConcurrentHashSet": "[1.3.0, )",
           "Nethermind.Config": "[1.37.0-unstable, )",
           "Nethermind.Core": "[1.37.0-unstable, )",
           "Nethermind.Crypto": "[1.37.0-unstable, )",

@@ -4,6 +4,7 @@
 using Nethermind.Config;
 using Nethermind.Consensus.AuRa.Config;
 using Nethermind.Core;
+using Nethermind.Core.Crypto;
 using Nethermind.Core.Exceptions;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
@@ -860,6 +861,61 @@ public class ChainSpecBasedSpecProviderTests
             Assert.That(provider.GetSpec((100, 30)).IsEip7954Enabled, Is.True);
             Assert.That(provider.GetSpec((100, 30)).MaxCodeSize, Is.EqualTo(CodeSizeConstants.MaxCodeSizeEip7954));
             Assert.That(provider.GetSpec((100, 30)).MaxInitCodeSize, Is.EqualTo(2L * CodeSizeConstants.MaxCodeSizeEip7954));
+        }
+    }
+
+    [Test]
+    public void Hidden_amsterdam_headers_use_temporary_no_bal_spec()
+    {
+        ChainSpec chainSpec = new()
+        {
+            Parameters = new ChainParameters
+            {
+                MaxCodeSize = CodeSizeConstants.MaxCodeSizeEip170,
+                MaxCodeSizeTransition = 0,
+                Eip7594TransitionTimestamp = 0,
+                Eip7907TransitionTimestamp = 0,
+                Eip7708TransitionTimestamp = 20,
+                Eip7778TransitionTimestamp = 20,
+                Eip7843TransitionTimestamp = 20,
+                Eip7928TransitionTimestamp = 20,
+                Eip7954TransitionTimestamp = 20,
+                Eip8024TransitionTimestamp = 20,
+                Eip8037TransitionTimestamp = 20,
+            },
+            EngineChainSpecParametersProvider = TestChainSpecParametersProvider.NethDev
+        };
+
+        ChainSpecBasedSpecProvider provider = new(chainSpec);
+        BlockHeader hiddenAmsterdamHeader = new(Keccak.Zero, Keccak.OfAnEmptySequenceRlp, Address.Zero, UInt256.Zero, 100, 30_000_000, 20, []);
+        BlockHeader fullAmsterdamHeader = new(Keccak.Zero, Keccak.OfAnEmptySequenceRlp, Address.Zero, UInt256.Zero, 100, 30_000_000, 20, [])
+        {
+            BlockAccessListHash = Keccak.OfAnEmptySequenceRlp,
+            SlotNumber = 1
+        };
+
+        IReleaseSpec hiddenAmsterdamSpec = provider.GetSpec(hiddenAmsterdamHeader);
+        IReleaseSpec fullAmsterdamSpec = provider.GetSpec(fullAmsterdamHeader);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(hiddenAmsterdamSpec.IsEip7708Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip7778Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip7843Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip7928Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip7954Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip8024Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.IsEip8037Enabled, Is.False);
+            Assert.That(hiddenAmsterdamSpec.MaxCodeSize, Is.EqualTo(CodeSizeConstants.MaxCodeSizeEip7907));
+
+            Assert.That(fullAmsterdamSpec.IsEip7708Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip7778Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip7843Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip7928Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip7954Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip8024Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.IsEip8037Enabled, Is.True);
+            Assert.That(fullAmsterdamSpec.MaxCodeSize, Is.EqualTo(CodeSizeConstants.MaxCodeSizeEip7907));
         }
     }
 

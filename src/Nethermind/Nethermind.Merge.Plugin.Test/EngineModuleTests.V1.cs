@@ -1562,10 +1562,28 @@ public partial class EngineModuleTests
             nameof(IEngineRpcModule.engine_newPayloadV4),
 
             nameof(IEngineRpcModule.engine_getPayloadV5),
+            nameof(IEngineRpcModule.engine_newPayloadV5),
+            nameof(IEngineRpcModule.engine_newPayloadWithWitnessV5),
+            nameof(IEngineRpcModule.engine_executeStatelessPayloadV5),
             nameof(IEngineRpcModule.engine_getBlobsV2),
             nameof(IEngineRpcModule.engine_getBlobsV3)
         };
         Assert.That(result, Is.EquivalentTo(expectedMethods));
+    }
+
+    [Test]
+    public void Should_return_expected_capabilities_for_osaka_branch()
+    {
+        EngineRpcCapabilitiesProvider engineRpcCapabilitiesProvider = new(new TestSingleReleaseSpecProvider(Osaka.Instance));
+        ExchangeCapabilitiesHandler exchangeCapabilitiesHandler = new(engineRpcCapabilitiesProvider, LimboLogs.Instance);
+        string[] result = exchangeCapabilitiesHandler.Handle(Array.Empty<string>()).Data.ToArray();
+
+        Assert.That(result, Does.Contain(nameof(IEngineRpcModule.engine_getPayloadV5)));
+        Assert.That(result, Does.Contain(nameof(IEngineRpcModule.engine_newPayloadV5)));
+        Assert.That(result, Does.Contain(nameof(IEngineRpcModule.engine_newPayloadWithWitnessV5)));
+        Assert.That(result, Does.Contain(nameof(IEngineRpcModule.engine_executeStatelessPayloadV5)));
+        Assert.That(result, Does.Not.Contain(nameof(IEngineRpcModule.engine_getPayloadV6)));
+        Assert.That(result, Does.Not.Contain(nameof(IEngineRpcModule.engine_forkchoiceUpdatedV4)));
     }
 
     [Test]

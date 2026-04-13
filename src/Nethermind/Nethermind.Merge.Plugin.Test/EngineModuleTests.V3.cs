@@ -15,6 +15,7 @@ using Nethermind.Api;
 using Nethermind.Blockchain;
 using Nethermind.Blockchain.Synchronization;
 using Nethermind.Consensus.Producers;
+using Nethermind.Consensus.Stateless;
 using Nethermind.Core;
 using Nethermind.Core.Collections;
 using Nethermind.Core.Crypto;
@@ -375,6 +376,8 @@ public partial class EngineModuleTests
                 Substitute.For<IAsyncHandler<GetBlobsHandlerV2Request, IEnumerable<BlobAndProofV2?>?>>(),
                 Substitute.For<IHandler<IReadOnlyList<Hash256>, IEnumerable<ExecutionPayloadBodyV2Result?>>>(),
                 Substitute.For<IGetPayloadBodiesByRangeV2Handler>(),
+                chain.BlockTree,
+                Substitute.For<IWitnessGeneratingBlockProcessingEnvFactory>(),
                 Substitute.For<IEngineRequestsTracker>(),
                 chain.SpecProvider,
                 new GCKeeper(NoGCStrategy.Instance, chain.LogManager),

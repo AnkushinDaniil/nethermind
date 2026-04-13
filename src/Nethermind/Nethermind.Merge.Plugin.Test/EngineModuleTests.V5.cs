@@ -17,6 +17,7 @@ using Nethermind.Core.Test.Builders;
 using Nethermind.Crypto;
 using Nethermind.Evm;
 using Nethermind.JsonRpc;
+using Nethermind.JsonRpc.Test;
 using Nethermind.Merge.Plugin.Data;
 using Nethermind.Serialization.Json;
 using Nethermind.Specs.Forks;
@@ -40,6 +41,137 @@ public partial class EngineModuleTests
         ShardBlobNetworkWrapper wrapper = new ShardBlobNetworkWrapper(getPayloadResultBlobsBundle.Blobs,
             getPayloadResultBlobsBundle.Commitments, getPayloadResultBlobsBundle.Proofs, ProofVersion.V1);
         Assert.That(IBlobProofsManager.For(ProofVersion.V1).ValidateProofs(wrapper), Is.True);
+    }
+
+    [Test]
+    public async Task NewPayloadV5_should_accept_osaka_payload_without_bal()
+    {
+        (IEngineRpcModule rpcModule, string? payloadId, Transaction[] transactions, MergeTestBlockchain chain) = await BuildAndGetPayloadV3Result(Osaka.Instance, 1);
+        using (chain)
+        {
+            ResultWrapper<GetPayloadV5Result?> payloadResult = await rpcModule.engine_getPayloadV5(Bytes.FromHexString(payloadId!));
+
+            Assert.That(payloadResult.Result.ResultType, Is.EqualTo(ResultType.Success));
+            Assert.That(payloadResult.Data, Is.Not.Null);
+
+            byte[]?[] blobVersionedHashes = transactions.SelectMany(static tx => tx.BlobVersionedHashes ?? []).ToArray();
+            ResultWrapper<PayloadStatusV1> result = await rpcModule.engine_newPayloadV5(
+                payloadResult.Data!.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? []);
+
+            Assert.That(result.Result.ResultType, Is.EqualTo(ResultType.Success));
+            Assert.That(result.Data.Status, Is.EqualTo(PayloadStatus.Valid));
+            Assert.That(result.Data.LatestValidHash, Is.EqualTo(payloadResult.Data.ExecutionPayload.BlockHash));
+        }
+    }
+
+    [Test]
+    public async Task NewPayloadV5_should_accept_amsterdam_payload_without_bal_or_slot_number()
+    {
+        (IEngineRpcModule rpcModule, string? payloadId, Transaction[] transactions, MergeTestBlockchain chain) = await BuildAndGetPayloadV3Result(Amsterdam.Instance, 1);
+        using (chain)
+        {
+            ResultWrapper<GetPayloadV5Result?> payloadResult = await rpcModule.engine_getPayloadV5(Bytes.FromHexString(payloadId!));
+
+            Assert.That(payloadResult.Result.ResultType, Is.EqualTo(ResultType.Success));
+            Assert.That(payloadResult.Data, Is.Not.Null);
+            Assert.That(payloadResult.Data!.ExecutionPayload.BlockAccessList, Is.Null);
+            Assert.That(payloadResult.Data.ExecutionPayload.SlotNumber, Is.Null);
+
+            byte[]?[] blobVersionedHashes = transactions.SelectMany(static tx => tx.BlobVersionedHashes ?? []).ToArray();
+            ResultWrapper<PayloadStatusV1> result = await rpcModule.engine_newPayloadV5(
+                payloadResult.Data.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? []);
+
+            Assert.That(result.Result.ResultType, Is.EqualTo(ResultType.Success));
+            Assert.That(result.Data.Status, Is.EqualTo(PayloadStatus.Valid));
+            Assert.That(result.Data.LatestValidHash, Is.EqualTo(payloadResult.Data.ExecutionPayload.BlockHash));
+        }
+    }
+
+    [Test]
+    public async Task NewPayloadWithWitnessV5_should_round_trip_into_executeStatelessPayloadV5()
+    {
+        (IEngineRpcModule rpcModule, string? payloadId, Transaction[] transactions, MergeTestBlockchain chain) = await BuildAndGetPayloadV3Result(Osaka.Instance, 1);
+        using (chain)
+        {
+            ResultWrapper<GetPayloadV5Result?> payloadResult = await rpcModule.engine_getPayloadV5(Bytes.FromHexString(payloadId!));
+
+            payloadResult.Result.Should().Be(Result.Success);
+            payloadResult.Data.Should().NotBeNull();
+
+            byte[]?[] blobVersionedHashes = transactions.SelectMany(static tx => tx.BlobVersionedHashes ?? []).ToArray();
+            ResultWrapper<PayloadStatusV1> witnessResult = await rpcModule.engine_newPayloadWithWitnessV5(
+                payloadResult.Data!.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? []);
+
+            witnessResult.Result.Should().Be(Result.Success);
+            witnessResult.Data.Status.Should().Be(PayloadStatus.Valid);
+            witnessResult.Data.LatestValidHash.Should().Be(payloadResult.Data.ExecutionPayload.BlockHash);
+            witnessResult.Data.Witness.Should().NotBeNullOrEmpty();
+
+            ResultWrapper<StatelessPayloadStatusV1> statelessResult = await rpcModule.engine_executeStatelessPayloadV5(
+                payloadResult.Data.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? [],
+                witnessResult.Data.Witness!);
+
+            statelessResult.Result.Should().Be(Result.Success);
+            statelessResult.Data.Status.Should().Be(PayloadStatus.Valid);
+            statelessResult.Data.StateRoot.Should().Be(payloadResult.Data.ExecutionPayload.StateRoot);
+            statelessResult.Data.ReceiptsRoot.Should().Be(payloadResult.Data.ExecutionPayload.ReceiptsRoot);
+            statelessResult.Data.ValidationError.Should().BeNull();
+        }
+    }
+
+    [Test]
+    public async Task WitnessV5_methods_should_round_trip_over_rpc()
+    {
+        (IEngineRpcModule rpcModule, string? payloadId, Transaction[] transactions, MergeTestBlockchain chain) = await BuildAndGetPayloadV3Result(Osaka.Instance, 1);
+        using (chain)
+        {
+            ResultWrapper<GetPayloadV5Result?> payloadResult = await rpcModule.engine_getPayloadV5(Bytes.FromHexString(payloadId!));
+            payloadResult.Result.Should().Be(Result.Success);
+            payloadResult.Data.Should().NotBeNull();
+
+            byte[]?[] blobVersionedHashes = transactions.SelectMany(static tx => tx.BlobVersionedHashes ?? []).ToArray();
+
+            string newPayloadResponse = await RpcTest.TestSerializedRequest(
+                rpcModule,
+                nameof(IEngineRpcModule.engine_newPayloadWithWitnessV5),
+                payloadResult.Data!.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? []);
+
+            using JsonDocument newPayloadJson = JsonDocument.Parse(newPayloadResponse);
+            JsonElement newPayloadResult = newPayloadJson.RootElement.GetProperty("result");
+            newPayloadResult.GetProperty("status").GetString().Should().Be(PayloadStatus.Valid);
+            string? witnessHex = newPayloadResult.GetProperty("witness").GetString();
+            witnessHex.Should().NotBeNullOrEmpty();
+
+            string statelessResponse = await RpcTest.TestSerializedRequest(
+                rpcModule,
+                nameof(IEngineRpcModule.engine_executeStatelessPayloadV5),
+                payloadResult.Data.ExecutionPayload,
+                blobVersionedHashes,
+                payloadResult.Data.ExecutionPayload.ParentBeaconBlockRoot,
+                payloadResult.Data.ExecutionRequests ?? [],
+                Bytes.FromHexString(witnessHex!));
+
+            using JsonDocument statelessJson = JsonDocument.Parse(statelessResponse);
+            JsonElement statelessResult = statelessJson.RootElement.GetProperty("result");
+            statelessResult.GetProperty("status").GetString().Should().Be(PayloadStatus.Valid);
+            statelessResult.GetProperty("stateRoot").GetString().Should().Be(payloadResult.Data.ExecutionPayload.StateRoot.ToString(true));
+            statelessResult.GetProperty("receiptsRoot").GetString().Should().Be(payloadResult.Data.ExecutionPayload.ReceiptsRoot.ToString(true));
+        }
     }
 
     [Test]

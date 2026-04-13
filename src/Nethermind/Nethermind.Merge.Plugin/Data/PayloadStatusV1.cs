@@ -30,6 +30,11 @@ namespace Nethermind.Merge.Plugin.Data
         public string Status { get; set; } = PayloadStatus.Invalid;
 
         /// <summary>
+        /// Opaque stateless witness bytes returned by witness-enabled engine methods.
+        /// </summary>
+        public byte[]? Witness { get; set; }
+
+        /// <summary>
         /// Hash of the most recent valid block in the branch defined by payload and its ancestors.
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]

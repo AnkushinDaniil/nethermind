@@ -23,7 +23,19 @@ public partial interface IEngineRpcModule : IRpcModule
         Description = "Verifies the payload according to the execution environment rules and returns the verification status and hash of the last valid block.",
         IsSharable = true,
         IsImplemented = true)]
-    Task<ResultWrapper<PayloadStatusV1>> engine_newPayloadV5(ExecutionPayloadV4 executionPayload, byte[]?[] blobVersionedHashes, Hash256? parentBeaconBlockRoot, byte[][]? executionRequests);
+    Task<ResultWrapper<PayloadStatusV1>> engine_newPayloadV5(ExecutionPayloadV3 executionPayload, byte[]?[] blobVersionedHashes, Hash256? parentBeaconBlockRoot, byte[][]? executionRequests);
+
+    [JsonRpcMethod(
+        Description = "Verifies the payload according to the execution environment rules and returns the verification status, hash of the last valid block, and a stateless witness.",
+        IsSharable = true,
+        IsImplemented = true)]
+    Task<ResultWrapper<PayloadStatusV1>> engine_newPayloadWithWitnessV5(ExecutionPayloadV3 executionPayload, byte[]?[] blobVersionedHashes, Hash256? parentBeaconBlockRoot, byte[][]? executionRequests);
+
+    [JsonRpcMethod(
+        Description = "Executes the payload statelessly on top of the provided witness and returns the computed execution roots.",
+        IsSharable = true,
+        IsImplemented = true)]
+    Task<ResultWrapper<StatelessPayloadStatusV1>> engine_executeStatelessPayloadV5(ExecutionPayloadV3 executionPayload, byte[]?[] blobVersionedHashes, Hash256? parentBeaconBlockRoot, byte[][]? executionRequests, byte[] opaqueWitness);
 
     [JsonRpcMethod(
         Description = "Applies fork choice and starts building a new block if payload attributes are present.",

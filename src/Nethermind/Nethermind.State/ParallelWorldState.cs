@@ -340,7 +340,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public void SetBlockAccessList(Block block, IReleaseSpec spec)
     {
-        if (!spec.BlockLevelAccessListsEnabled)
+        if (!spec.BlockLevelAccessListsEnabled || !TracingEnabled)
         {
             return;
         }

@@ -4,6 +4,8 @@
 using System;
 using System.Collections.Generic;
 using Nethermind.Api;
+using Nethermind.Blockchain;
+using Nethermind.Consensus.Stateless;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Specs;
 using Nethermind.JsonRpc;
@@ -18,6 +20,8 @@ public partial class EngineRpcModule : IEngineRpcModule
 {
 
     private readonly IHandler<IEnumerable<string>, IEnumerable<string>> _capabilitiesHandler;
+    private readonly IBlockTree _blockTree;
+    private readonly IWitnessGeneratingBlockProcessingEnvFactory _witnessGeneratingBlockProcessingEnvFactory;
     protected readonly ISpecProvider _specProvider;
     protected readonly ILogger _logger;
 
@@ -38,6 +42,8 @@ public partial class EngineRpcModule : IEngineRpcModule
         IAsyncHandler<GetBlobsHandlerV2Request, IEnumerable<BlobAndProofV2?>?> getBlobsHandlerV2,
         IHandler<IReadOnlyList<Hash256>, IEnumerable<ExecutionPayloadBodyV2Result?>> getPayloadBodiesByHashV2Handler,
         IGetPayloadBodiesByRangeV2Handler getPayloadBodiesByRangeV2Handler,
+        IBlockTree blockTree,
+        IWitnessGeneratingBlockProcessingEnvFactory witnessGeneratingBlockProcessingEnvFactory,
         IEngineRequestsTracker engineRequestsTracker,
         ISpecProvider specProvider,
         GCKeeper gcKeeper,
@@ -59,6 +65,8 @@ public partial class EngineRpcModule : IEngineRpcModule
         _getBlobsHandlerV2 = getBlobsHandlerV2;
         _executionGetPayloadBodiesByHashV2Handler = getPayloadBodiesByHashV2Handler;
         _executionGetPayloadBodiesByRangeV2Handler = getPayloadBodiesByRangeV2Handler;
+        _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
+        _witnessGeneratingBlockProcessingEnvFactory = witnessGeneratingBlockProcessingEnvFactory ?? throw new ArgumentNullException(nameof(witnessGeneratingBlockProcessingEnvFactory));
         _engineRequestsTracker = engineRequestsTracker;
         _specProvider = specProvider ?? throw new ArgumentNullException(nameof(specProvider));
         _gcKeeper = gcKeeper;

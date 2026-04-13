@@ -154,6 +154,16 @@ public class PayloadAttributes
         string methodName,
         [NotNullWhen(false)] out string? error)
     {
+        // Temporary Amsterdam compatibility: keep accepting FCUv3/V3 payload attributes
+        // after Amsterdam activates so CLs can continue building V5 payloads without slotNumber.
+        if (fcuVersion == EngineApiVersions.Fcu.V3 &&
+            actualVersion == PayloadAttributesVersions.V3 &&
+            timestampVersion == PayloadAttributesVersions.V4)
+        {
+            error = null;
+            return PayloadAttributesValidationResult.Success;
+        }
+
         // This FCU version doesn't support this fork at all (e.g. V3 attrs sent to FCUv2).
         if (!IsSupportedFcuForkCombination(fcuVersion, actualVersion))
         {
