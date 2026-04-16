@@ -110,7 +110,10 @@ public sealed class BlockCachePreWarmer : IBlockCachePreWarmer
 
             if (_logger.IsDebug) _logger.Debug($"Started pre-warming caches for block {suggestedBlock.Number}.");
 
-            WarmupTransactions(blockState, parallelOptions);
+            if (!spec.BlockLevelAccessListsEnabled)
+            {
+                WarmupTransactions(blockState, parallelOptions);
+            }
             WarmupWithdrawals(parallelOptions, spec, suggestedBlock, parent);
 
             if (_logger.IsDebug) _logger.Debug($"Finished pre-warming caches for block {suggestedBlock.Number}.");
@@ -264,20 +267,36 @@ public sealed class BlockCachePreWarmer : IBlockCachePreWarmer
         {
             Address senderAddress = tx.SenderAddress!;
             IWorldState worldState = scope.WorldState;
-
-            if (!worldState.AccountExists(senderAddress))
+            IBlockAccessListBuilder? balBuilder = worldState as IBlockAccessListBuilder;
+            bool tracingEnabled = balBuilder?.TracingEnabled == true;
+            if (tracingEnabled)
             {
-                worldState.CreateAccountIfNotExists(senderAddress, UInt256.Zero);
+                balBuilder!.TracingEnabled = false;
             }
 
-            if (blockState.Spec.UseTxAccessLists)
+            try
             {
-                worldState.WarmUp(tx.AccessList); // eip-2930
+                if (!worldState.AccountExists(senderAddress))
+                {
+                    worldState.CreateAccountIfNotExists(senderAddress, UInt256.Zero);
+                }
+
+                if (blockState.Spec.UseTxAccessLists)
+                {
+                    worldState.WarmUp(tx.AccessList); // eip-2930
+                }
+
+                TransactionResult result = scope.TransactionProcessor.Warmup(tx, NullTxTracer.Instance);
+
+                if (blockState.PreWarmer._logger.IsTrace) blockState.PreWarmer._logger.Trace($"Finished pre-warming cache for tx[{txIndex}] {tx.Hash} with {result}");
             }
-
-            TransactionResult result = scope.TransactionProcessor.Warmup(tx, NullTxTracer.Instance);
-
-            if (blockState.PreWarmer._logger.IsTrace) blockState.PreWarmer._logger.Trace($"Finished pre-warming cache for tx[{txIndex}] {tx.Hash} with {result}");
+            finally
+            {
+                if (tracingEnabled)
+                {
+                    balBuilder!.TracingEnabled = true;
+                }
+            }
         }
         catch (Exception ex) when (ex is EvmException or OverflowException)
         {

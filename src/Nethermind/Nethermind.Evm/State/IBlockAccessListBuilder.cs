@@ -12,8 +12,9 @@ public interface IBlockAccessListBuilder
     public bool TracingEnabled { get; set; }
     public BlockAccessList GeneratedBlockAccessList { get; set; }
     public void AddAccountRead(Address address);
+    public void AddStorageRead(in StorageCell storageCell);
     public void LoadSuggestedBlockAccessList(BlockAccessList suggested, long gasUsed);
     public long GasUsed();
     public void ValidateBlockAccessList(BlockHeader block, ushort index, long gasRemaining);
-    public void SetBlockAccessList(Block block, IReleaseSpec spec);
+    public void SetBlockAccessList(Block block, IReleaseSpec spec, bool forceGenerated = false);
 }

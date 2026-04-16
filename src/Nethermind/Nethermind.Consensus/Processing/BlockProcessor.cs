@@ -11,6 +11,7 @@ using Nethermind.Blockchain.Blocks;
 using Nethermind.Blockchain.Receipts;
 using Nethermind.Blockchain.Tracing;
 using Nethermind.Consensus.ExecutionRequests;
+using Nethermind.Consensus.Producers;
 using Nethermind.Consensus.Rewards;
 using Nethermind.Consensus.Validators;
 using Nethermind.Consensus.Withdrawals;
@@ -144,7 +145,11 @@ public partial class BlockProcessor(
 
         executionRequestsProcessor.ProcessExecutionRequests(block, stateProvider, receipts, spec);
 
-        _balBuilder?.SetBlockAccessList(block, spec);
+        ValidateBlockAccessList(block, options, spec);
+        bool forceGeneratedBlockAccessList =
+            block is BlockToProduce ||
+            options.ContainsFlag(ProcessingOptions.ProducingBlock);
+        _balBuilder?.SetBlockAccessList(block, spec, forceGeneratedBlockAccessList);
 
         ReceiptsTracer.EndBlockTrace();
 
@@ -165,6 +170,22 @@ public partial class BlockProcessor(
         header.Hash = header.CalculateHash();
 
         return receipts;
+    }
+
+    private void ValidateBlockAccessList(Block block, ProcessingOptions options, IReleaseSpec spec)
+    {
+        if (_balBuilder is null || options.ContainsFlag(ProcessingOptions.NoValidation) || !spec.BlockLevelAccessListsEnabled)
+        {
+            return;
+        }
+
+        long gasRemaining = block.Header.GasLimit;
+        _balBuilder.ValidateBlockAccessList(block.Header, 0, gasRemaining);
+        for (int i = 0; i < block.Transactions.Length; i++)
+        {
+            gasRemaining -= block.Transactions[i].BlockGasUsed;
+            _balBuilder.ValidateBlockAccessList(block.Header, (ushort)(i + 1), gasRemaining);
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -244,7 +265,11 @@ public partial class BlockProcessor(
         }
 
         Block block = suggestedBlock.WithReplacedHeader(headerForProcessing);
-        block.BlockAccessList = suggestedBlock.BlockAccessList;
+        if (suggestedBlock is not BlockToProduce)
+        {
+            block.BlockAccessList = suggestedBlock.BlockAccessList;
+            block.EncodedBlockAccessList = suggestedBlock.EncodedBlockAccessList;
+        }
 
         return block;
     }

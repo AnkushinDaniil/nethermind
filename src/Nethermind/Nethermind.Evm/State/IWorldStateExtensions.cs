@@ -39,4 +39,7 @@ public static class WorldStateExtensions
 
     public static void AddAccountRead(this IWorldState worldState, Address address)
         => (worldState as IBlockAccessListBuilder)?.AddAccountRead(address);
+
+    public static void AddStorageRead(this IWorldState worldState, in StorageCell storageCell)
+        => (worldState as IBlockAccessListBuilder)?.AddStorageRead(storageCell);
 }

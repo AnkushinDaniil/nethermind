@@ -18,6 +18,7 @@ using Nethermind.Consensus.Processing;
 using Nethermind.Consensus.Rewards;
 using Nethermind.Consensus.Validators;
 using Nethermind.Core;
+using Nethermind.Core.BlockAccessLists;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
@@ -399,6 +400,22 @@ public abstract class BlockchainTestBase
             return ["TransactionException.GAS_ALLOWANCE_EXCEEDED", "BlockException.GAS_USED_OVERFLOW"];
         }
 
+        if (validationError.Contains("BlockAccessListGasLimitExceeded:", StringComparison.Ordinal))
+        {
+            return ["TransactionException.GAS_ALLOWANCE_EXCEEDED", "BlockException.BLOCK_ACCESS_LIST_GAS_LIMIT_EXCEEDED"];
+        }
+
+        if (validationError.Contains("ConsolidationsFailed: Contract execution failed.", StringComparison.Ordinal) ||
+            validationError.Contains("WithdrawalsFailed: Contract execution failed.", StringComparison.Ordinal))
+        {
+            return ["BlockException.SYSTEM_CONTRACT_CALL_FAILED"];
+        }
+
+        if (validationError.Contains("DepositsInvalid: Invalid deposit event layout:", StringComparison.Ordinal))
+        {
+            return ["BlockException.INVALID_DEPOSIT_EVENT_LAYOUT"];
+        }
+
         if (validationError.Contains("intrinsic gas too low", StringComparison.Ordinal))
         {
             return ["TransactionException.INTRINSIC_GAS_TOO_LOW", "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"];
@@ -434,6 +451,7 @@ public abstract class BlockchainTestBase
             {
                 byte[] rlpBytes = Bytes.FromHexString(testBlockJson.Rlp!);
                 Block suggestedBlock = Rlp.Decode<Block>(rlpBytes);
+                AttachBlockAccessList(testBlockJson, suggestedBlock);
 
                 if (testBlockJson.BlockHeader is not null)
                 {
@@ -475,6 +493,74 @@ public abstract class BlockchainTestBase
 
         return correctRlp;
     }
+
+    private static void AttachBlockAccessList(TestBlockJson testBlockJson, Block suggestedBlock)
+    {
+        if (testBlockJson.BlockAccessList is null)
+        {
+            return;
+        }
+
+        SortedDictionary<Address, AccountChanges> accountChanges = new();
+        foreach (TestBlockAccessListAccountJson accountJson in testBlockJson.BlockAccessList)
+        {
+            Address address = new(accountJson.Address);
+            SortedList<UInt256, SlotChanges> storageChanges = new();
+            foreach (TestBlockAccessListStorageSlotJson storageSlotJson in accountJson.StorageChanges ?? [])
+            {
+                UInt256 slot = ParseUInt256(storageSlotJson.Slot);
+                SortedList<ushort, StorageChange> slotChanges = new();
+                foreach (TestBlockAccessListStorageChangeJson slotChangeJson in storageSlotJson.SlotChanges ?? [])
+                {
+                    ushort blockAccessIndex = ParseUShort(slotChangeJson.BlockAccessIndex);
+                    slotChanges.Add(blockAccessIndex, new StorageChange(blockAccessIndex, ParseUInt256(slotChangeJson.PostValue)));
+                }
+                storageChanges.Add(slot, new SlotChanges(slot, slotChanges));
+            }
+
+            SortedSet<StorageRead> storageReads = new();
+            foreach (string storageRead in accountJson.StorageReads ?? [])
+            {
+                storageReads.Add(new StorageRead(ParseUInt256(storageRead)));
+            }
+
+            SortedList<ushort, BalanceChange> balanceChanges = new();
+            foreach (TestBlockAccessListBalanceChangeJson balanceChangeJson in accountJson.BalanceChanges ?? [])
+            {
+                ushort blockAccessIndex = ParseUShort(balanceChangeJson.BlockAccessIndex);
+                balanceChanges.Add(blockAccessIndex, new BalanceChange(blockAccessIndex, ParseUInt256(balanceChangeJson.PostBalance)));
+            }
+
+            SortedList<ushort, NonceChange> nonceChanges = new();
+            foreach (TestBlockAccessListNonceChangeJson nonceChangeJson in accountJson.NonceChanges ?? [])
+            {
+                ushort blockAccessIndex = ParseUShort(nonceChangeJson.BlockAccessIndex);
+                nonceChanges.Add(blockAccessIndex, new NonceChange(blockAccessIndex, ParseULong(nonceChangeJson.PostNonce)));
+            }
+
+            SortedList<ushort, CodeChange> codeChanges = new();
+            foreach (TestBlockAccessListCodeChangeJson codeChangeJson in accountJson.CodeChanges ?? [])
+            {
+                ushort blockAccessIndex = ParseUShort(codeChangeJson.BlockAccessIndex);
+                codeChanges.Add(blockAccessIndex, new CodeChange(blockAccessIndex, Bytes.FromHexString(codeChangeJson.NewCode)));
+            }
+
+            accountChanges.Add(address, new AccountChanges(address, storageChanges, storageReads, balanceChanges, nonceChanges, codeChanges));
+        }
+
+        BlockAccessList blockAccessList = new(accountChanges);
+        suggestedBlock.BlockAccessList = blockAccessList;
+        suggestedBlock.EncodedBlockAccessList = Rlp.Encode(blockAccessList).Bytes;
+    }
+
+    private static UInt256 ParseUInt256(string value) =>
+        Bytes.FromHexString(value).ToUInt256();
+
+    private static ushort ParseUShort(string value) =>
+        (ushort)Bytes.FromHexString(value).ToUnsignedBigInteger();
+
+    private static ulong ParseULong(string value) =>
+        (ulong)Bytes.FromHexString(value).ToUnsignedBigInteger();
 
     private static void InitializeTestState(BlockchainTest test, IWorldState stateProvider, ISpecProvider specProvider)
     {

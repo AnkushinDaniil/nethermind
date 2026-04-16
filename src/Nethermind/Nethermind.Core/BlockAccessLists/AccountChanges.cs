@@ -96,13 +96,15 @@ public class AccountChanges : IEquatable<AccountChanges>
     public bool TryGetSlotChanges(UInt256 key, [NotNullWhen(true)] out SlotChanges? slotChanges)
         => _storageChanges.TryGetValue(key, out slotChanges);
 
-    public void ClearEmptySlotChangesAndAddRead(UInt256 key)
+    public bool ClearEmptySlotChangesAndAddRead(UInt256 key)
     {
         if (TryGetSlotChanges(key, out SlotChanges? slotChanges) && slotChanges.Changes.Count == 0)
         {
             _storageChanges.Remove(key);
-            _storageReads.Add(new(key));
+            return _storageReads.Add(new(key));
         }
+
+        return false;
     }
 
     public SlotChanges GetOrAddSlotChanges(UInt256 key)
@@ -128,25 +130,37 @@ public class AccountChanges : IEquatable<AccountChanges>
     }
 
     public void AddStorageRead(UInt256 key)
+        => TryAddStorageRead(key);
+
+    public bool TryAddStorageRead(UInt256 key)
         => _storageReads.Add(new(key));
 
-    public void RemoveStorageRead(UInt256 key)
+    public bool ContainsStorageRead(UInt256 key)
+        => _storageReads.Contains(new(key));
+
+    public bool RemoveStorageRead(UInt256 key)
         => _storageReads.Remove(new(key));
 
-    public void SelfDestruct()
+    public IEnumerable<UInt256> SelfDestruct()
     {
+        List<UInt256> addedReads = [];
         foreach (UInt256 key in _storageChanges.Keys)
         {
-            AddStorageRead(key);
+            if (TryAddStorageRead(key))
+            {
+                addedReads.Add(key);
+            }
         }
 
         _storageChanges.Clear();
         _nonceChanges.Clear();
         _codeChanges.Clear();
+
+        return addedReads;
     }
 
     public void AddBalanceChange(BalanceChange balanceChange)
-        => _balanceChanges.Add(balanceChange.BlockAccessIndex, balanceChange);
+        => _balanceChanges[balanceChange.BlockAccessIndex] = balanceChange;
 
     public bool PopBalanceChange(ushort index, [NotNullWhen(true)] out BalanceChange? balanceChange)
     {
@@ -163,7 +177,7 @@ public class AccountChanges : IEquatable<AccountChanges>
         => _balanceChanges.TryGetValue(index, out BalanceChange balanceChange) ? balanceChange : null;
 
     public void AddNonceChange(NonceChange nonceChange)
-        => _nonceChanges.Add(nonceChange.BlockAccessIndex, nonceChange);
+        => _nonceChanges[nonceChange.BlockAccessIndex] = nonceChange;
 
     public bool PopNonceChange(ushort index, [NotNullWhen(true)] out NonceChange? nonceChange)
     {
@@ -180,7 +194,7 @@ public class AccountChanges : IEquatable<AccountChanges>
         => _nonceChanges.TryGetValue(index, out NonceChange nonceChange) ? nonceChange : null;
 
     public void AddCodeChange(CodeChange codeChange)
-        => _codeChanges.Add(codeChange.BlockAccessIndex, codeChange);
+        => _codeChanges[codeChange.BlockAccessIndex] = codeChange;
 
     public bool PopCodeChange(ushort index, [NotNullWhen(true)] out CodeChange? codeChange)
     {

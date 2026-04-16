@@ -48,7 +48,7 @@ public class CodeInfo : IThreadPoolWorkItem, IEquatable<CodeInfo>
 
     private readonly JumpDestinationAnalyzer? _analyzer;
 
-    public bool IsEmpty => ReferenceEquals(_analyzer, _emptyAnalyzer);
+    public bool IsEmpty => Code.Length == 0 && !IsPrecompile;
     public bool IsPrecompile => Precompile is not null;
 
     public bool ValidateJump(int destination)

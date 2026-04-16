@@ -14,20 +14,38 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
     [JsonIgnore]
     public ushort Index = 0;
     public IEnumerable<AccountChanges> AccountChanges => _accountChanges.Values;
-
     private readonly SortedDictionary<Address, AccountChanges> _accountChanges;
     private readonly Stack<Change> _changes;
+    private readonly Stack<Address> _accountsAddedInCurrentIndex;
+    private readonly Stack<StorageCell> _storageReadsAddedInCurrentIndex;
+    private readonly Stack<Address> _accountReadsAddedInCurrentIndex;
+    private readonly HashSet<Address> _accountReads;
 
     public BlockAccessList()
     {
         _accountChanges = [];
         _changes = new();
+        _accountsAddedInCurrentIndex = new();
+        _storageReadsAddedInCurrentIndex = new();
+        _accountReadsAddedInCurrentIndex = new();
+        _accountReads = [];
     }
 
     public BlockAccessList(SortedDictionary<Address, AccountChanges> accountChanges)
     {
         _accountChanges = accountChanges;
         _changes = new();
+        _accountsAddedInCurrentIndex = new();
+        _storageReadsAddedInCurrentIndex = new();
+        _accountReadsAddedInCurrentIndex = new();
+        _accountReads = [];
+        foreach (KeyValuePair<Address, AccountChanges> item in accountChanges)
+        {
+            if (IsEmpty(item.Value))
+            {
+                _accountReads.Add(item.Key);
+            }
+        }
     }
 
     public bool Equals(BlockAccessList? other)
@@ -74,13 +92,18 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
     public void IncrementBlockAccessIndex()
     {
+        PruneEmptyNonReadAccounts();
         _changes.Clear();
+        _accountsAddedInCurrentIndex.Clear();
+        _storageReadsAddedInCurrentIndex.Clear();
+        _accountReadsAddedInCurrentIndex.Clear();
         Index++;
     }
 
     public void RollbackCurrentIndex()
     {
         Restore(0);
+        RollbackReadsAddedInCurrentIndex();
         _changes.Clear();
         Index--;
     }
@@ -89,6 +112,10 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
     {
         _accountChanges.Clear();
         _changes.Clear();
+        _accountsAddedInCurrentIndex.Clear();
+        _storageReadsAddedInCurrentIndex.Clear();
+        _accountReadsAddedInCurrentIndex.Clear();
+        _accountReads.Clear();
         Index = 0;
     }
 
@@ -100,13 +127,12 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
             return;
         }
 
-        AccountChanges accountChanges = GetOrAddAccountChanges(address);
-
-        // don't add zero balance transfers, but add empty account changes
         if (isZeroBalanceChange)
         {
             return;
         }
+
+        AccountChanges accountChanges = GetOrAddAccountChanges(address);
 
         bool changedDuringTx = HasBalanceChangedDuringTx(address, before, after);
         accountChanges.PopBalanceChange(Index, out BalanceChange? oldBalanceChange);
@@ -128,12 +154,12 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
     public void AddCodeChange(Address address, byte[] before, ReadOnlyMemory<byte> after)
     {
-        AccountChanges accountChanges = GetOrAddAccountChanges(address);
-
         if (before.AsSpan().SequenceEqual(after.Span))
         {
             return;
         }
+
+        AccountChanges accountChanges = GetOrAddAccountChanges(address);
 
         bool changedDuringTx = HasCodeChangedDuringTx(accountChanges.Address, before, after.Span);
         accountChanges.PopCodeChange(Index, out CodeChange? oldCodeChange);
@@ -142,7 +168,8 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
             Address = address,
             Type = ChangeType.CodeChange,
             PreviousValue = oldCodeChange,
-            PreTxCode = before
+            PreTxCode = before,
+            BlockAccessIndex = Index
         });
 
         if (changedDuringTx)
@@ -165,7 +192,8 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         {
             Address = address,
             Type = ChangeType.NonceChange,
-            PreviousValue = oldNonceChange
+            PreviousValue = oldNonceChange,
+            BlockAccessIndex = Index
         });
 
         accountChanges.AddNonceChange(new(Index, newNonce));
@@ -173,20 +201,29 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
     public void AddAccountRead(Address address)
     {
-        if (!_accountChanges.ContainsKey(address))
+        if (_accountReads.Add(address))
         {
-            _accountChanges.Add(address, new(address));
+            _accountReadsAddedInCurrentIndex.Push(address);
         }
+        GetOrAddAccountChanges(address);
+    }
+
+    public void AddTransientAccountRead(Address address)
+    {
+        GetOrAddAccountChanges(address);
     }
 
     public void AddStorageChange(Address address, UInt256 key, UInt256 before, UInt256 after)
     {
+        if (before == after)
+        {
+            AddStorageRead(address, key);
+            return;
+        }
+
         AccountChanges accountChanges = GetOrAddAccountChanges(address);
 
-        if (before != after)
-        {
-            StorageChange(accountChanges, key, before, after);
-        }
+        StorageChange(accountChanges, key, before, after);
     }
 
     public void AddStorageChange(in StorageCell storageCell, UInt256 before, UInt256 after)
@@ -201,7 +238,10 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
         if (!accountChanges.HasStorageChange(key))
         {
-            accountChanges.AddStorageRead(key);
+            if (accountChanges.TryAddStorageRead(key))
+            {
+                _storageReadsAddedInCurrentIndex.Push(new(address, key));
+            }
         }
     }
 
@@ -222,7 +262,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                     Type = ChangeType.StorageChange,
                     Slot = slotChanges.Slot,
                     PreviousValue = change.Value,
-                    BlockAccessIndex = Index
+                    BlockAccessIndex = change.Value.BlockAccessIndex
                 });
             }
         }
@@ -237,7 +277,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                 Address = address,
                 Type = ChangeType.NonceChange,
                 PreviousValue = nonceChanges[i],
-                BlockAccessIndex = Index
+                BlockAccessIndex = nonceChanges[i].BlockAccessIndex
             });
         }
 
@@ -251,11 +291,14 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                 Address = address,
                 Type = ChangeType.CodeChange,
                 PreviousValue = codeChanges[i],
-                BlockAccessIndex = Index
+                BlockAccessIndex = codeChanges[i].BlockAccessIndex
             });
         }
 
-        accountChanges.SelfDestruct();
+        foreach (UInt256 storageRead in accountChanges.SelfDestruct())
+        {
+            _storageReadsAddedInCurrentIndex.Push(new(address, storageRead));
+        }
         AddBalanceChange(address, oldBalance, 0);
     }
 
@@ -265,6 +308,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
         bool changedDuringTx = HasStorageChangedDuringTx(accountChanges.Address, key, before, after);
         slotChanges.TryPopStorageChange(Index, out StorageChange? oldStorageChange);
+        bool removesStorageRead = changedDuringTx && accountChanges.ContainsStorageRead(key);
 
         _changes.Push(new()
         {
@@ -273,17 +317,21 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
             Slot = key,
             Type = ChangeType.StorageChange,
             PreviousValue = oldStorageChange,
-            PreTxStorage = before
+            PreTxStorage = before,
+            RemovedStorageRead = removesStorageRead
         });
 
         if (changedDuringTx)
         {
-            slotChanges.Changes.Add(Index, new(Index, after));
+            slotChanges.Changes[Index] = new(Index, after);
             accountChanges.RemoveStorageRead(key);
         }
         else
         {
-            accountChanges.ClearEmptySlotChangesAndAddRead(key);
+            if (accountChanges.ClearEmptySlotChangesAndAddRead(key))
+            {
+                _storageReadsAddedInCurrentIndex.Push(new(accountChanges.Address, key));
+            }
         }
     }
 
@@ -313,7 +361,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                 case ChangeType.CodeChange:
                     CodeChange? previousCode = change.PreviousValue is null ? null : (CodeChange)change.PreviousValue;
 
-                    accountChanges.PopCodeChange(Index, out _);
+                    accountChanges.PopCodeChange(change.BlockAccessIndex, out _);
                     if (previousCode is not null)
                     {
                         accountChanges.AddCodeChange(previousCode.Value);
@@ -322,7 +370,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                 case ChangeType.NonceChange:
                     NonceChange? previousNonce = change.PreviousValue is null ? null : (NonceChange)change.PreviousValue;
 
-                    accountChanges.PopNonceChange(Index, out _);
+                    accountChanges.PopNonceChange(change.BlockAccessIndex, out _);
                     if (previousNonce is not null)
                     {
                         accountChanges.AddNonceChange(previousNonce.Value);
@@ -332,14 +380,17 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                     StorageChange? previousStorage = change.PreviousValue is null ? null : (StorageChange)change.PreviousValue;
                     SlotChanges slotChanges = accountChanges.GetOrAddSlotChanges(change.Slot!.Value);
 
-                    slotChanges.TryPopStorageChange(Index, out _);
+                    slotChanges.TryPopStorageChange(change.BlockAccessIndex, out _);
                     if (previousStorage is not null)
                     {
-                        slotChanges.Changes.Add(previousStorage.Value.BlockAccessIndex, previousStorage.Value);
+                        slotChanges.Changes[previousStorage.Value.BlockAccessIndex] = previousStorage.Value;
                         accountChanges.RemoveStorageRead(change.Slot.Value);
                     }
 
-                    accountChanges.ClearEmptySlotChangesAndAddRead(change.Slot!.Value);
+                    if (accountChanges.ClearEmptySlotChangesAndAddRead(change.Slot!.Value) && !change.RemovedStorageRead)
+                    {
+                        _storageReadsAddedInCurrentIndex.Push(new(change.Address, change.Slot.Value));
+                    }
                     break;
             }
         }
@@ -505,10 +556,83 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         {
             AccountChanges accountChanges = new(address);
             _accountChanges.Add(address, accountChanges);
+            _accountsAddedInCurrentIndex.Push(address);
             return accountChanges;
         }
         return existing;
     }
+
+    private void RollbackReadsAddedInCurrentIndex()
+    {
+        while (_storageReadsAddedInCurrentIndex.TryPop(out StorageCell storageCell))
+        {
+            if (_accountChanges.TryGetValue(storageCell.Address, out AccountChanges? accountChanges))
+            {
+                accountChanges.RemoveStorageRead(storageCell.Index);
+            }
+        }
+
+        while (_accountReadsAddedInCurrentIndex.TryPop(out Address? address))
+        {
+            if (address is not null)
+            {
+                _accountReads.Remove(address);
+            }
+        }
+
+        while (_accountsAddedInCurrentIndex.TryPop(out Address? address))
+        {
+            if (address is not null && _accountChanges.TryGetValue(address, out AccountChanges? accountChanges) && IsEmpty(accountChanges))
+            {
+                _accountChanges.Remove(address);
+            }
+        }
+    }
+
+    public void PruneEmptyNonReadAccounts()
+    {
+        List<Address> emptyAccounts = [];
+        foreach (KeyValuePair<Address, AccountChanges> item in _accountChanges)
+        {
+            if (IsEmpty(item.Value))
+            {
+                if (!_accountReads.Contains(item.Key))
+                {
+                    emptyAccounts.Add(item.Key);
+                }
+            }
+        }
+
+        foreach (Address address in emptyAccounts)
+        {
+            _accountChanges.Remove(address);
+        }
+    }
+
+    public void PruneEmptyAccounts()
+    {
+        List<Address> emptyAccounts = [];
+        foreach (KeyValuePair<Address, AccountChanges> item in _accountChanges)
+        {
+            if (IsEmpty(item.Value))
+            {
+                emptyAccounts.Add(item.Key);
+            }
+        }
+
+        foreach (Address address in emptyAccounts)
+        {
+            _accountChanges.Remove(address);
+            _accountReads.Remove(address);
+        }
+    }
+
+    private static bool IsEmpty(AccountChanges accountChanges) =>
+        accountChanges.StorageReads.Count == 0 &&
+        accountChanges.StorageChanges.Count == 0 &&
+        accountChanges.BalanceChanges.Count == 0 &&
+        accountChanges.NonceChanges.Count == 0 &&
+        accountChanges.CodeChanges.Count == 0;
 
     private enum ChangeType
     {
@@ -528,6 +652,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         public UInt256? PreTxStorage { get; init; }
         public byte[]? PreTxCode { get; init; }
         public ushort BlockAccessIndex { get; init; }
+        public bool RemovedStorageRead { get; init; }
     }
 }
 

@@ -26,14 +26,14 @@ public class PrecompileCachedCodeInfoRepository(
         : precompileProvider.GetPrecompiles().ToFrozenDictionary(kvp => kvp.Key, kvp => CreateCachedPrecompile(kvp, precompileCache));
 
     public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec,
-        out Address? delegationAddress)
+        out Address? delegationAddress, bool trackEmptyAccountRead = true)
     {
         if (vmSpec.IsPrecompile(codeSource) && _cachedPrecompile.TryGetValue(codeSource, out var cachedCodeInfo))
         {
-            delegationAddress = null;
+            _ = baseCodeInfoRepository.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress, trackEmptyAccountRead);
             return cachedCodeInfo;
         }
-        return baseCodeInfoRepository.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress);
+        return baseCodeInfoRepository.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress, trackEmptyAccountRead);
     }
 
     public ValueHash256 GetExecutableCodeHash(Address address, IReleaseSpec spec)

@@ -46,8 +46,8 @@ public class CacheCodeInfoRepository : ICodeInfoRepository
         return cachedCodeInfo;
     }
 
-    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress) =>
-        _inner.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress);
+    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress, bool trackEmptyAccountRead = true) =>
+        _inner.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress, trackEmptyAccountRead);
 
     public ValueHash256 GetExecutableCodeHash(Address address, IReleaseSpec spec) =>
         _inner.GetExecutableCodeHash(address, spec);

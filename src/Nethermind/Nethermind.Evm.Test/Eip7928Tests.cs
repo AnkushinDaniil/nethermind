@@ -5,10 +5,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Nethermind.Blockchain;
 using Nethermind.Blockchain.Tracing;
 using Nethermind.Core;
 using Nethermind.Core.BlockAccessLists;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Eip2930;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Precompiles;
 using Nethermind.Core.Test;
@@ -16,7 +18,9 @@ using Nethermind.Core.Test.Builders;
 using Nethermind.Crypto;
 using Nethermind.Evm.State;
 using Nethermind.Evm.TransactionProcessing;
+using Nethermind.Evm.Tracing;
 using Nethermind.Int256;
+using Nethermind.Logging;
 using Nethermind.Specs;
 using Nethermind.Specs.Forks;
 using NUnit.Framework;
@@ -155,6 +159,134 @@ public class Eip7928Tests() : VirtualMachineTestsBase
         }
     }
 
+    [Test]
+    public void Constructs_BAL_for_top_level_precompile_with_cached_code_info()
+    {
+        InitWorldState(TestState);
+        ParallelWorldState worldState = TestState as ParallelWorldState;
+        worldState.TracingEnabled = true;
+
+        ICodeInfoRepository codeInfoRepository = new PrecompileCachedCodeInfoRepository(
+            new EthereumPrecompileProvider(),
+            CodeInfoRepository,
+            precompileCache: null);
+        _processor = new EthereumTransactionProcessor(
+            BlobBaseFeeCalculator.Instance,
+            SpecProvider,
+            TestState,
+            Machine,
+            codeInfoRepository,
+            LimboLogs.Instance);
+
+        Transaction tx = Build.A.Transaction
+            .WithTo(PrecompiledAddresses.Identity)
+            .WithData([1, 2, 3, 4])
+            .WithGasLimit(100_000)
+            .WithValue(0)
+            .SignedAndResolved(_ecdsa, TestItem.PrivateKeyA)
+            .TestObject;
+        Block block = Build.A.Block.TestObject;
+
+        _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
+        TransactionResult res = _processor.Execute(tx, NullTxTracer.Instance);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(res.TransactionExecuted);
+            Assert.That(worldState.GeneratedBlockAccessList.GetAccountChanges(PrecompiledAddresses.Identity), Is.Not.Null);
+        }
+    }
+
+    [Test]
+    public void Does_not_add_EIP2930_access_list_entries_to_BAL_without_actual_touch()
+    {
+        InitWorldState(TestState);
+        ParallelWorldState worldState = TestState as ParallelWorldState;
+        worldState.TracingEnabled = true;
+
+        AccessList accessList = new AccessList.Builder()
+            .AddAddress(TestItem.AddressC)
+            .AddStorage(1)
+            .Build();
+        Transaction tx = Build.A.Transaction
+            .WithType(TxType.AccessList)
+            .WithAccessList(accessList)
+            .To(TestItem.AddressB)
+            .WithGasLimit(100_000)
+            .WithValue(0)
+            .SignedAndResolved(_ecdsa, TestItem.PrivateKeyA)
+            .TestObject;
+        Block block = Build.A.Block.TestObject;
+
+        _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
+        TransactionResult res = _processor.Execute(tx, NullTxTracer.Instance);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(res.TransactionExecuted);
+            Assert.That(worldState.GeneratedBlockAccessList.GetAccountChanges(TestItem.AddressB), Is.Not.Null);
+            Assert.That(worldState.GeneratedBlockAccessList.GetAccountChanges(TestItem.AddressC), Is.Null);
+        }
+    }
+
+    [Test]
+    public void Does_not_add_system_user_to_BAL_for_system_call_sender()
+    {
+        InitWorldState(TestState);
+        ParallelWorldState worldState = TestState as ParallelWorldState;
+        worldState.TracingEnabled = true;
+
+        SystemCall tx = new()
+        {
+            SenderAddress = Address.SystemUser,
+            To = Eip7002Constants.WithdrawalRequestPredeployAddress,
+            GasLimit = 30_000_000,
+            GasPrice = UInt256.Zero,
+            Value = UInt256.Zero,
+            Data = Array.Empty<byte>(),
+        };
+        Block block = Build.A.Block.TestObject;
+
+        _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
+        TransactionResult res = _processor.Execute(tx, NullTxTracer.Instance);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(res.TransactionExecuted);
+            Assert.That(worldState.GeneratedBlockAccessList.GetAccountChanges(Address.SystemUser), Is.Null);
+        }
+    }
+
+    [Test]
+    public void Does_not_add_coinbase_to_BAL_for_access_list_warmup_without_actual_touch()
+    {
+        InitWorldState(TestState);
+        ParallelWorldState worldState = TestState as ParallelWorldState;
+        worldState.TracingEnabled = true;
+
+        SystemCall tx = new()
+        {
+            SenderAddress = Address.SystemUser,
+            To = Eip7002Constants.WithdrawalRequestPredeployAddress,
+            GasLimit = 30_000_000,
+            GasPrice = UInt256.Zero,
+            Value = UInt256.Zero,
+            Data = Array.Empty<byte>(),
+        };
+        Block block = Build.A.Block
+            .WithBeneficiary(TestItem.AddressE)
+            .TestObject;
+
+        _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
+        TransactionResult res = _processor.Execute(tx, NullTxTracer.Instance);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(res.TransactionExecuted);
+            Assert.That(worldState.GeneratedBlockAccessList.GetAccountChanges(TestItem.AddressE), Is.Null);
+        }
+    }
+
     private void InitWorldState(IWorldState worldState, byte[]? extraCode = null)
     {
         worldState.CreateAccount(TestItem.AddressA, _accountBalance);
@@ -255,7 +387,7 @@ public class Eip7928Tests() : VirtualMachineTestsBase
                 .PushData(TestItem.AddressB)
                 .Op(Instruction.EXTCODECOPY)
                 .Done;
-            changes = [testAccount, emptyBAccount];
+            changes = [testAccount];
             yield return new TestCaseData(changes, code, null, false) { TestName = "extcodecopy" };
 
             code = Prepare.EvmCode
@@ -320,12 +452,15 @@ public class Eip7928Tests() : VirtualMachineTestsBase
                 .Op(Instruction.SSTORE)
                 .DelegateCall(_callTargetAddress, 20_000)
                 .Done;
-            changes = [new(_callTargetAddress), Build.An.AccountChanges
-                .WithAddress(_testAddress)
-                .WithStorageChanges(slot, [new(0, changedValue)])
-                .WithNonceChanges([new(0, 1)])
-                .WithBalanceChanges([new(0, _testAccountBalance)])
-                .TestObject];
+            changes = [
+                new(_callTargetAddress),
+                Build.An.AccountChanges
+                    .WithAddress(_testAddress)
+                    .WithStorageChanges(slot, [new(0, changedValue)])
+                    .WithNonceChanges([new(0, 1)])
+                    .WithBalanceChanges([new(0, _testAccountBalance)])
+                    .TestObject
+            ];
             yield return new TestCaseData(changes, code, revertToPreviousCode, false)
             { TestName = "revert_with_return_to_original" };
 
@@ -364,6 +499,22 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             ];
             yield return new TestCaseData(changes, code, callTargetCode, false) { TestName = "call" };
 
+            code = Prepare.EvmCode
+                .CallWithValue(TestItem.AddressB, 20_000, callValue)
+                .Done;
+            changes = [
+                Build.An.AccountChanges
+                    .WithAddress(_testAddress)
+                    .WithNonceChanges([new(0, 1)])
+                    .WithBalanceChanges([new(0, _testAccountBalance - callValue)])
+                    .TestObject,
+                Build.An.AccountChanges
+                    .WithAddress(TestItem.AddressB)
+                    .WithBalanceChanges([new(0, callValue)])
+                    .TestObject
+            ];
+            yield return new TestCaseData(changes, code, null, false) { TestName = "value_call_to_empty_account" };
+
             byte[] returnValueCode = Prepare.EvmCode
                 .PushData(0)
                 .PushData(0)
@@ -396,6 +547,12 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             yield return new TestCaseData(changes, code, callTargetCode, false) { TestName = "callcode" };
 
             code = Prepare.EvmCode
+                .CallCode(_callTargetAddress, 20_000)
+                .Done;
+            changes = [testAccount, new AccountChanges(_callTargetAddress)];
+            yield return new TestCaseData(changes, code, Array.Empty<byte>(), false) { TestName = "callcode_empty_code_source" };
+
+            code = Prepare.EvmCode
                 .DelegateCall(_callTargetAddress, 20_000)
                 .Done;
             changes = [
@@ -409,6 +566,12 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             ];
             // storage read happens in test account context
             yield return new TestCaseData(changes, code, callTargetCode, false) { TestName = "delegatecall" };
+
+            code = Prepare.EvmCode
+                .DelegateCall(_callTargetAddress, 20_000)
+                .Done;
+            changes = [testAccount, new AccountChanges(_callTargetAddress)];
+            yield return new TestCaseData(changes, code, Array.Empty<byte>(), false) { TestName = "delegatecall_empty_code_source" };
 
             code = Prepare.EvmCode
                 .StaticCall(_callTargetAddress, 20_000)
@@ -473,13 +636,13 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             code = Prepare.EvmCode
                 .CallWithInput(PrecompiledAddresses.Identity, 20_000, [1, 2, 3, 4])
                 .Done;
-            changes = [testAccount, new(PrecompiledAddresses.Identity)];
+            changes = [testAccount, new AccountChanges(PrecompiledAddresses.Identity)];
             yield return new TestCaseData(changes, code, null, false) { TestName = "precompile" };
 
             code = Prepare.EvmCode
                 .Call(TestItem.AddressB, 20_000)
                 .Done;
-            changes = [testAccount, new(TestItem.AddressB)];
+            changes = [testAccount, new AccountChanges(TestItem.AddressB)];
             yield return new TestCaseData(changes, code, null, false) { TestName = "zero_value_call" };
         }
     }
@@ -494,7 +657,6 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             AccountChanges testAccount = new(_testAddress);
             AccountChanges addressB = new(TestItem.AddressB);
             AccountChanges callTarget = new(_callTargetAddress);
-
             code = Prepare.EvmCode
                 .PushData(TestItem.AddressB)
                 .Op(Instruction.BALANCE)
@@ -635,6 +797,36 @@ public class Eip7928Tests() : VirtualMachineTestsBase
                 GasCostOf.ColdAccountAccess - 1,
                 EvmExceptionType.OutOfGas)
             { TestName = "call_oog_pre_state_access" };
+
+            code = Prepare.EvmCode
+                .Call(_callTargetAddress, 0)
+                .PushData(0)
+                .PushData(0)
+                .Op(Instruction.MSTORE)
+                .Done;
+            changes = [testAccount];
+            yield return new TestCaseData(
+                changes,
+                code,
+                null,
+                GasCostOf.ColdAccountAccess,
+                EvmExceptionType.OutOfGas)
+            { TestName = "delegated_call_oog_on_delegated_access" };
+
+            code = Prepare.EvmCode
+                .CallWithValue(TestItem.AddressB, 0, 1)
+                .PushData(0)
+                .PushData(0)
+                .Op(Instruction.MSTORE)
+                .Done;
+            changes = [testAccount];
+            yield return new TestCaseData(
+                changes,
+                code,
+                null,
+                GasCostOf.ColdAccountAccess,
+                EvmExceptionType.OutOfGas)
+            { TestName = "call_with_value_oog_on_new_account_charge" };
 
             code = Prepare.EvmCode
                 .Call(_callTargetAddress, 0)
@@ -836,6 +1028,23 @@ public class Eip7928Tests() : VirtualMachineTestsBase
                 GasCostOf.ColdSLoad + GasCostOf.SSet - 1,
                 EvmExceptionType.OutOfGas)
             { TestName = "sstore_oog_post_state_access" };
+
+            code = Prepare.EvmCode
+                .PushData(6)
+                .PushData(slot)
+                .Op(Instruction.SSTORE)
+                .PushData(0)
+                .PushData(0)
+                .Op(Instruction.MSTORE)
+                .Done;
+            changes = [Build.An.AccountChanges.WithAddress(_testAddress).WithStorageReads(slot).TestObject];
+            yield return new TestCaseData(
+                changes,
+                code,
+                null,
+                GasCostOf.ColdSLoad + GasCostOf.SSet + GasCostOf.VeryLow + GasCostOf.Memory - 1,
+                EvmExceptionType.OutOfGas)
+            { TestName = "sstore_reverted_write_keeps_storage_read" };
 
             code = Prepare.EvmCode
                 .PushData(TestItem.AddressB)

@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
+using Nethermind.Evm.State;
 using Nethermind.Evm.GasPolicy;
 using static Nethermind.Evm.VirtualMachineStatics;
 
@@ -364,6 +365,7 @@ internal static partial class EvmInstructions
 
         // Construct the storage cell for the executing account.
         StorageCell storageCell = new(vmState.Env.ExecutingAccount, in result);
+        vm.WorldState.AddStorageRead(storageCell);
 
         // Charge gas based on whether this is a cold or warm storage access.
         if (!TGasPolicy.ConsumeStorageAccessGas(ref gas, in vmState.AccessTracker, vm.TxTracer.IsTracingAccess, in storageCell, StorageAccessType.SSTORE, spec))
@@ -474,6 +476,7 @@ internal static partial class EvmInstructions
 
         // Construct the storage cell for the executing account.
         StorageCell storageCell = new(vmState.Env.ExecutingAccount, in result);
+        vm.WorldState.AddStorageRead(storageCell);
 
         // Charge gas based on whether this is a cold or warm storage access.
         if (!TGasPolicy.ConsumeStorageAccessGas(ref gas, in vmState.AccessTracker, vm.TxTracer.IsTracingAccess, in storageCell, StorageAccessType.SSTORE, spec))

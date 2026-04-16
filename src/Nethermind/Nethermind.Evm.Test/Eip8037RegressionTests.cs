@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Demerzel Solutions Limited
 // SPDX-License-Identifier: LGPL-3.0-only
 
+using System;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Crypto;
 using Nethermind.Evm.State;
+using Nethermind.Evm.Tracing;
 using Nethermind.Evm.TransactionProcessing;
 using Nethermind.Int256;
 using Nethermind.Specs;
@@ -188,6 +190,40 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
     }
 
     [Test]
+    public void Eip8037_successful_top_level_create_counts_initcode_state_gas_in_block_state_gas()
+    {
+        byte[] initCode = Prepare.EvmCode
+            .PushData(1)
+            .PushData(0)
+            .Op(Instruction.SSTORE)
+            .PushData(1)
+            .PushData(0)
+            .Op(Instruction.RETURN)
+            .Done;
+
+        const long gasLimit = 1_000_000;
+        (Block block, Transaction transaction) = PrepareTx(Activation, gasLimit, initCode, value: 0, blockGasLimit: 50_000_000);
+        transaction.To = null;
+        transaction.Data = initCode;
+        Address contractAddress = ContractAddress.From(Sender, 0);
+
+        TestAllTracerWithOutput tracer = CreateTracer();
+        TransactionResult result = _processor.Execute(
+            transaction,
+            new BlockExecutionContext(block.Header, SpecProvider.GetSpec(block.Header)),
+            tracer);
+
+        Assert.That(result, Is.EqualTo(TransactionResult.Ok));
+        Assert.That(tracer.StatusCode, Is.EqualTo(StatusCode.Success));
+        long expectedStateGas = GasCostOf.CreateState + GasCostOf.SSetState + GasCostOf.CodeDepositState;
+        Assert.That(tracer.GasConsumedResult.BlockStateGas,
+            Is.EqualTo(expectedStateGas));
+        Assert.That(block.Header.StateGasUsed, Is.EqualTo(expectedStateGas));
+        AssertStorage(new StorageCell(contractAddress, 0), UInt256.One);
+        Assert.That(TestState.GetCode(contractAddress), Is.EqualTo(new byte[] { 0 }));
+    }
+
+    [Test]
     public void Eip8037_oversized_initcode_create_must_keep_create_state_out_of_block_state_gas()
     {
         byte[] createFromCalldataCode = Prepare.EvmCode
@@ -316,7 +352,7 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
     }
 
     [Test]
-    public void Eip8037_top_level_exceptional_halt_must_count_state_spill_in_block_regular()
+    public void Eip8037_top_level_exceptional_halt_must_keep_state_gas_in_state_dimension()
     {
         Prepare codeBuilder = Prepare.EvmCode
             .PushData(1)
@@ -336,9 +372,9 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
         Assert.That(tracer.StatusCode, Is.EqualTo(StatusCode.Failure));
         Assert.That(tracer.Error, Is.EqualTo(nameof(EvmExceptionType.StackOverflow)));
         Assert.That(tracer.GasConsumedResult.SpentGas, Is.EqualTo(gasLimit));
-        Assert.That(tracer.GasConsumedResult.BlockGas, Is.EqualTo(gasLimit));
-        Assert.That(tracer.GasConsumedResult.EffectiveBlockGas, Is.EqualTo(gasLimit));
         Assert.That(tracer.GasConsumedResult.BlockStateGas, Is.EqualTo(GasCostOf.SSetState));
+        Assert.That(tracer.GasConsumedResult.BlockGas, Is.EqualTo(gasLimit - GasCostOf.SSetState));
+        Assert.That(tracer.GasConsumedResult.EffectiveBlockGas, Is.EqualTo(gasLimit - GasCostOf.SSetState));
         AssertStorage(new StorageCell(Recipient, 0), UInt256.Zero);
     }
 
@@ -397,6 +433,29 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
         Assert.That(block.Header.GasUsed, Is.LessThanOrEqualTo(block.Header.GasLimit));
     }
 
+    [Test]
+    public void Eip8037_block_validation_must_not_use_tx_gas_limit_as_remaining_regular_budget()
+    {
+        const long blockGasLimit = 500_000;
+        const long txGasLimit = 100_000;
+
+        (Block block, Transaction transaction) = PrepareTx(Activation, txGasLimit, null, value: 0, blockGasLimit: blockGasLimit);
+
+        block.Header.RegularGasUsed = blockGasLimit - GasCostOf.Transaction;
+        block.Header.GasUsed = block.Header.RegularGasUsed;
+        long remainingRegularGas = blockGasLimit - block.Header.RegularGasUsed;
+
+        TransactionResult result = _processor.Execute(
+            transaction,
+            new BlockExecutionContext(block.Header, SpecProvider.GetSpec(block.Header)),
+            NullTxTracer.Instance);
+
+        Assert.That(remainingRegularGas, Is.LessThan(txGasLimit));
+        Assert.That(result, Is.EqualTo(TransactionResult.Ok));
+        Assert.That(block.Header.RegularGasUsed, Is.EqualTo(blockGasLimit));
+        Assert.That(block.Header.GasUsed, Is.EqualTo(blockGasLimit));
+    }
+
     /// <summary>
     /// A child CALL that runs out of gas during SSTORE must not spill state gas into the
     /// parent frame's reservoir. If it does, the parent can incorrectly complete its own
@@ -431,7 +490,7 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
     }
 
     [Test]
-    public void Eip8037_reverted_child_sstores_must_still_count_toward_block_state_gas()
+    public void Eip8037_reverted_child_sstores_return_state_gas_to_parent_reservoir()
     {
         byte[] childCode = Prepare.EvmCode
             .PushData(1)
@@ -455,7 +514,7 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
 
         Assert.That(tracer.StatusCode, Is.EqualTo(StatusCode.Success),
             "The parent CALL returns failure, but the parent frame continues successfully.");
-        Assert.That(tracer.GasConsumedResult.BlockStateGas, Is.EqualTo(2 * GasCostOf.SSetState));
+        Assert.That(tracer.GasConsumedResult.BlockStateGas, Is.Zero);
         AssertStorage(new StorageCell(TestItem.AddressC, 0), UInt256.Zero);
         AssertStorage(new StorageCell(TestItem.AddressC, 1), UInt256.Zero);
     }
@@ -521,15 +580,16 @@ public class Eip8037RegressionTests : VirtualMachineTestsBase
 
         Assert.That(result, Is.EqualTo(TransactionResult.Ok));
         Assert.That(tracer.StatusCode, Is.EqualTo(StatusCode.Failure));
-        long intrinsicAuthState = GasCostOf.NewAccountState + GasCostOf.PerAuthBaseState;
-        long expectedBlockRegular = tx.GasLimit - intrinsicAuthState;
+        long expectedRemainingStateReservoir = GasCostOf.NewAccountState - 2 * GasCostOf.SSetState;
         long expectedBlockState = GasCostOf.PerAuthBaseState + 2 * GasCostOf.SSetState;
-        long expectedSpentGas = expectedBlockRegular + expectedBlockState;
+        long expectedSpentGas = tx.GasLimit - expectedRemainingStateReservoir;
+        long expectedBlockRegular = expectedSpentGas - expectedBlockState;
+        long expectedHeaderGasUsed = Math.Max(expectedBlockRegular, expectedBlockState);
 
         Assert.That(tracer.GasConsumedResult.SpentGas, Is.EqualTo(expectedSpentGas), tracer.GasConsumedResult.ToString());
         Assert.That(tracer.GasConsumedResult.BlockGas, Is.EqualTo(expectedBlockRegular), tracer.GasConsumedResult.ToString());
         Assert.That(tracer.GasConsumedResult.BlockStateGas, Is.EqualTo(expectedBlockState), tracer.GasConsumedResult.ToString());
-        Assert.That(block.Header.GasUsed, Is.EqualTo(expectedBlockRegular));
+        Assert.That(block.Header.GasUsed, Is.EqualTo(expectedHeaderGasUsed));
         AssertStorage(new StorageCell(authority.Address, 0), UInt256.Zero);
         AssertStorage(new StorageCell(authority.Address, 1), UInt256.Zero);
         Assert.That(TestState.GetCode(authority.Address), Is.Not.Empty);

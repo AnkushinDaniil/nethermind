@@ -18,7 +18,7 @@ public class OverridableCodeInfoRepository(ICodeInfoRepository codeInfoRepositor
     private readonly Dictionary<Address, (CodeInfo codeInfo, ValueHash256 codeHash)> _codeOverrides = new();
     private readonly Dictionary<Address, (CodeInfo codeInfo, Address initialAddr)> _precompileOverrides = new();
 
-    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress)
+    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress, bool trackEmptyAccountRead = true)
     {
         delegationAddress = null;
         if (_precompileOverrides.TryGetValue(codeSource, out var precompile)) return precompile.codeInfo;
@@ -28,11 +28,11 @@ public class OverridableCodeInfoRepository(ICodeInfoRepository codeInfoRepositor
             return !result.codeInfo.IsEmpty &&
                    ICodeInfoRepository.TryGetDelegatedAddress(result.codeInfo.CodeSpan, out delegationAddress) &&
                    followDelegation
-                ? GetCachedCodeInfo(delegationAddress, false, vmSpec, out Address? _)
+                ? GetCachedCodeInfo(delegationAddress, false, vmSpec, out Address? _, trackEmptyAccountRead)
                 : result.codeInfo;
         }
 
-        return codeInfoRepository.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress);
+        return codeInfoRepository.GetCachedCodeInfo(codeSource, followDelegation, vmSpec, out delegationAddress, trackEmptyAccountRead);
     }
 
     public void InsertCode(ReadOnlyMemory<byte> code, Address codeOwner, IReleaseSpec spec) =>

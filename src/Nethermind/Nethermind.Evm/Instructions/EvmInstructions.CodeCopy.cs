@@ -213,8 +213,6 @@ internal static partial class EvmInstructions
             if (!TGasPolicy.UpdateMemoryCost(ref gas, in a, result, vm.VmState))
                 goto OutOfGas;
 
-            vm.WorldState.AddAccountRead(address);
-
             CodeInfo codeInfo = vm.CodeInfoRepository
                 .GetCachedCodeInfo(address, followDelegation: false, spec, out _);
 
@@ -239,11 +237,6 @@ internal static partial class EvmInstructions
                 vm.TxTracer.ReportMemoryChange(a, in slice);
             }
         }
-        else
-        {
-            vm.WorldState.AddAccountRead(address);
-        }
-
         return EvmExceptionType.None;
         // Jump forward to be unpredicted by the branch predictor.
     OutOfGas:

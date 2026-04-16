@@ -10,11 +10,13 @@ using System.Collections.Generic;
 using Nethermind.Core.Test.Builders;
 using FluentAssertions;
 using Nethermind.Blockchain;
+using Nethermind.Core.BlockAccessLists;
 using Nethermind.Evm.State;
 using Nethermind.Core.Specs;
 using Nethermind.Evm.CodeAnalysis;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Test;
+using Nethermind.Evm.Precompiles;
 
 namespace Nethermind.Evm.Test;
 
@@ -159,5 +161,29 @@ public class CodeInfoRepositoryTests
         EthereumCodeInfoRepository sut = new(stateProvider);
 
         sut.GetCachedCodeInfo(TestItem.AddressA, _releaseSpec).Should().BeEquivalentTo(new CodeInfo(code));
+    }
+
+    [Test]
+    public void GetCachedCodeInfo_PrecompileRecordsAccountReadInBlockAccessList()
+    {
+        IReleaseSpec releaseSpec = ReleaseSpecSubstitute.Create();
+        releaseSpec.Precompiles.Returns([ECRecoverPrecompile.Address]);
+        ParallelWorldState stateProvider = new(TestWorldStateFactory.CreateForTest())
+        {
+            TracingEnabled = true
+        };
+        EthereumCodeInfoRepository sut = new(stateProvider);
+
+        sut.GetCachedCodeInfo(ECRecoverPrecompile.Address, releaseSpec);
+
+        AccountChanges? accountChanges = stateProvider.GeneratedBlockAccessList.GetAccountChanges(ECRecoverPrecompile.Address);
+        accountChanges.Should().NotBeNull();
+    }
+
+    [Test]
+    public void EmptyCodeInfoSentinel_IsEmpty()
+    {
+        CodeInfo.Empty.IsEmpty.Should().BeTrue();
+        CodeInfo.Empty.CodeSpan.Length.Should().Be(0);
     }
 }

@@ -42,25 +42,30 @@ public class CodeInfoRepository : ICodeInfoRepository
             codeHash == ValueKeccak.OfAnEmptyString ? CodeInfo.Empty : GetCodeInfo(worldState, in codeHash);
     }
 
-    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress)
+    public CodeInfo GetCachedCodeInfo(Address codeSource, bool followDelegation, IReleaseSpec vmSpec, out Address? delegationAddress, bool trackEmptyAccountRead = true)
     {
         delegationAddress = null;
         if (vmSpec.IsPrecompile(codeSource))
         {
-            if (_balBuilder is not null && _balBuilder.TracingEnabled)
-            {
-                _balBuilder.AddAccountRead(codeSource);
-            }
+            AddAccountRead(codeSource);
             return _localPrecompiles[codeSource];
         }
 
         CodeInfo codeInfo = InternalGetCodeInfo(codeSource);
+        if (trackEmptyAccountRead || codeInfo.CodeSpan.Length > 0)
+        {
+            AddAccountRead(codeSource);
+        }
 
         if (!codeInfo.IsEmpty && ICodeInfoRepository.TryGetDelegatedAddress(codeInfo.CodeSpan, out delegationAddress))
         {
             if (followDelegation)
             {
                 codeInfo = InternalGetCodeInfo(delegationAddress);
+                if (trackEmptyAccountRead || codeInfo.CodeSpan.Length > 0)
+                {
+                    AddAccountRead(delegationAddress);
+                }
             }
         }
 
@@ -69,8 +74,24 @@ public class CodeInfoRepository : ICodeInfoRepository
 
     private CodeInfo InternalGetCodeInfo(Address codeSource)
     {
-        ref readonly ValueHash256 codeHash = ref _worldState.GetCodeHash(codeSource);
-        return _codeInfoLoader(codeHash);
+        bool tracingEnabled = _balBuilder?.TracingEnabled == true;
+        if (tracingEnabled)
+        {
+            _balBuilder!.TracingEnabled = false;
+        }
+
+        try
+        {
+            ref readonly ValueHash256 codeHash = ref _worldState.GetCodeHash(codeSource);
+            return _codeInfoLoader(codeHash);
+        }
+        finally
+        {
+            if (tracingEnabled)
+            {
+                _balBuilder!.TracingEnabled = true;
+            }
+        }
     }
 
     internal static CodeInfo GetCodeInfo(IWorldState worldState, in ValueHash256 codeHash)
@@ -99,6 +120,14 @@ public class CodeInfoRepository : ICodeInfoRepository
 
     public void SetDelegation(Address codeSource, Address authority, IReleaseSpec spec) =>
         SetDelegation(_worldState, codeSource, authority, spec, out _, out _);
+
+    private void AddAccountRead(Address address)
+    {
+        if (_balBuilder?.TracingEnabled == true)
+        {
+            _balBuilder.AddAccountRead(address);
+        }
+    }
 
     public static bool SetDelegation(
         IWorldState worldState,
@@ -143,6 +172,24 @@ public class CodeInfoRepository : ICodeInfoRepository
             : codeHash;
     }
 
-    public bool TryGetDelegation(Address address, IReleaseSpec spec, [NotNullWhen(true)] out Address? delegatedAddress) =>
-        ICodeInfoRepository.TryGetDelegatedAddress(InternalGetCodeInfo(address).CodeSpan, out delegatedAddress);
+    public bool TryGetDelegation(Address address, IReleaseSpec spec, [NotNullWhen(true)] out Address? delegatedAddress)
+    {
+        bool tracingEnabled = _balBuilder?.TracingEnabled == true;
+        if (tracingEnabled)
+        {
+            _balBuilder!.TracingEnabled = false;
+        }
+
+        try
+        {
+            return ICodeInfoRepository.TryGetDelegatedAddress(InternalGetCodeInfo(address).CodeSpan, out delegatedAddress);
+        }
+        finally
+        {
+            if (tracingEnabled)
+            {
+                _balBuilder!.TracingEnabled = true;
+            }
+        }
+    }
 }

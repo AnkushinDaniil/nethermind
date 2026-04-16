@@ -169,6 +169,7 @@ internal static partial class EvmInstructions
         // Charge gas for accessing the account's code (including delegation logic if applicable).
         if (!TGasPolicy.ConsumeAccountAccessGas(ref gas, vm.Spec, in vm.VmState.AccessTracker,
                 vm.TxTracer.IsTracingAccess, codeSource)) goto OutOfGas;
+
         bool _ = vm.TxExecutionContext.CodeInfoRepository
             .TryGetDelegation(codeSource, vm.Spec, out Address delegated);
 
@@ -179,11 +180,29 @@ internal static partial class EvmInstructions
         }
 
         // Charge additional gas if the target account is new or considered empty.
-        bool chargesNewAccount = spec.ClearEmptyAccountWhenTouched switch
+        IBlockAccessListBuilder? balBuilder = state as IBlockAccessListBuilder;
+        bool tracingEnabled = balBuilder?.TracingEnabled == true;
+        if (tracingEnabled)
         {
-            false => !state.AccountExists(target),
-            true => transferValue != 0 && state.IsDeadAccount(target),
-        };
+            balBuilder!.TracingEnabled = false;
+        }
+
+        bool chargesNewAccount;
+        try
+        {
+            chargesNewAccount = spec.ClearEmptyAccountWhenTouched switch
+            {
+                false => !state.AccountExists(target),
+                true => transferValue != 0 && state.IsDeadAccount(target),
+            };
+        }
+        finally
+        {
+            if (tracingEnabled)
+            {
+                balBuilder!.TracingEnabled = true;
+            }
+        }
 
         bool newAccountOutOfGas = chargesNewAccount && !TGasPolicy.ConsumeNewAccountCreation<TEip8037>(ref gas);
 
@@ -191,7 +210,7 @@ internal static partial class EvmInstructions
 
 
         // Retrieve code information for the call and schedule background analysis if needed.
-        CodeInfo codeInfo = vm.CodeInfoRepository.GetCachedCodeInfo(codeSource, spec);
+        CodeInfo codeInfo = vm.CodeInfoRepository.GetCachedCodeInfo(codeSource, true, spec, out Address? _, trackEmptyAccountRead: false);
 
         // If contract is large, charge for access
         if (spec.IsEip7907Enabled)
@@ -253,6 +272,11 @@ internal static partial class EvmInstructions
                 vm.TxTracer.ReportGasUpdateForVmTrace(gasLimitUl, TGasPolicy.GetRemainingGas(in gas));
             }
             return EvmExceptionType.None;
+        }
+
+        if (typeof(TOpCall) == typeof(OpCallCode) || typeof(TOpCall) == typeof(OpDelegateCall))
+        {
+            state.AddAccountRead(codeSource);
         }
 
         // Take a snapshot of the state for potential rollback.

@@ -198,6 +198,8 @@ internal static partial class EvmInstructions
             vm.VmState.AccessTracker.WarmUp(contractAddress);
         }
 
+        state.AddAccountRead(contractAddress);
+
         // Increment the nonce of the executing account to reflect the contract creation.
         state.IncrementNonce(env.ExecutingAccount);
 

@@ -570,6 +570,7 @@ internal static partial class EvmInstructions
         // Charge gas for account access. If insufficient gas remains, abort.
         if (!TGasPolicy.ConsumeAccountAccessGas(ref gas, spec, in vm.VmState.AccessTracker, vm.TxTracer.IsTracingAccess, address)) goto OutOfGas;
 
+        vm.WorldState.AddAccountRead(address);
         ref readonly UInt256 result = ref vm.WorldState.GetBalance(address);
         stack.PushUInt256<TTracingInst>(in result);
 
@@ -634,6 +635,7 @@ internal static partial class EvmInstructions
         if (!TGasPolicy.ConsumeAccountAccessGas(ref gas, spec, in vm.VmState.AccessTracker, vm.TxTracer.IsTracingAccess, address)) goto OutOfGas;
 
         IWorldState state = vm.WorldState;
+        state.AddAccountRead(address);
         // For dead accounts, the specification requires pushing zero.
         if (state.IsDeadAccount(address))
         {

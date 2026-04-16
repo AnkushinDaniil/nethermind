@@ -452,6 +452,100 @@ namespace Nethermind.Blockchain.Test
             Assert.That(selectedTransactions[1], Is.SameAs(secondTx));
         }
 
+        [Test]
+        public void BlockProductionTransactionPicker_allows_tx_gas_limit_above_remaining_block_gas_under_eip8037()
+        {
+            ParallelWorldState stateProvider = new(TestWorldStateFactory.CreateForTest(parallel: false));
+
+            using IDisposable scope = stateProvider.BeginScope(IWorldState.PreGenesis);
+            stateProvider.CreateAccount(TestItem.AddressA, 1.Ether);
+
+            Transaction transaction = Build.A.Transaction
+                .WithSenderAddress(TestItem.AddressA)
+                .WithNonce(0)
+                .WithGasPrice(1)
+                .WithGasLimit(GasCostOf.Transaction * 2)
+                .SignedAndResolved(TestItem.PrivateKeyA)
+                .TestObject;
+
+            Block block = Build.A.Block
+                .WithGasLimit(GasCostOf.Transaction)
+                .WithTransactions([transaction])
+                .TestObject;
+
+            BlockProcessor.BlockProductionTransactionPicker txPicker = new(new TestSingleReleaseSpecProvider(Amsterdam.Instance));
+            BlockProcessor.AddingTxEventArgs args = txPicker.CanAddTransaction(
+                block,
+                transaction,
+                new HashSet<Transaction>(),
+                stateProvider.GetUntrackedReader());
+
+            Assert.That(args.Action, Is.EqualTo(BlockProcessor.TxAction.Add));
+        }
+
+        [Test]
+        public void BlockProductionTransactionsExecutor_skips_eip8037_tx_when_actual_block_gas_exceeds_limit()
+        {
+            ParallelWorldState stateProvider = new(TestWorldStateFactory.CreateForTest(parallel: false));
+
+            using IDisposable scope = stateProvider.BeginScope(IWorldState.PreGenesis);
+            stateProvider.CreateAccount(TestItem.AddressA, 1.Ether);
+
+            Transaction firstTx = Build.A.Transaction
+                .WithSenderAddress(TestItem.AddressA)
+                .WithNonce(0)
+                .WithGasPrice(1)
+                .WithGasLimit(GasCostOf.Transaction)
+                .To(TestItem.AddressB)
+                .SignedAndResolved(TestItem.PrivateKeyA)
+                .TestObject;
+
+            Transaction overflowingTx = Build.A.Transaction
+                .WithSenderAddress(TestItem.AddressA)
+                .WithNonce(1)
+                .WithGasPrice(1)
+                .WithGasLimit(100_000)
+                .To(TestItem.AddressB)
+                .SignedAndResolved(TestItem.PrivateKeyA)
+                .TestObject;
+
+            Block block = Build.A.Block
+                .WithGasLimit(60_000)
+                .WithTransactions([firstTx, overflowingTx])
+                .TestObject;
+            BlockToProduce blockToProduce = new(block.Header, block.Transactions, block.Uncles);
+
+            ITransactionProcessorAdapter transactionProcessor = Substitute.For<ITransactionProcessorAdapter>();
+            transactionProcessor.Execute(Arg.Any<Transaction>(), Arg.Any<ITxTracer>()).Returns(info =>
+            {
+                Transaction tx = info.Arg<Transaction>();
+                ITxTracer tracer = info.Arg<ITxTracer>();
+
+                stateProvider.IncrementNonce(tx.SenderAddress!);
+
+                long gasUsed = tx.Nonce == 0 ? GasCostOf.Transaction : 40_000;
+                tracer.MarkAsSuccess(TestItem.AddressB, new(gasUsed, gasUsed, gasUsed), [], []);
+
+                return TransactionResult.Ok;
+            });
+
+            BlockProcessor.BlockProductionTransactionsExecutor txExecutor = new(
+                transactionProcessor,
+                stateProvider,
+                new BlockProcessor.BlockProductionTransactionPicker(new TestSingleReleaseSpecProvider(Amsterdam.Instance)),
+                LimboLogs.Instance);
+
+            BlockReceiptsTracer receiptsTracer = new();
+            receiptsTracer.StartNewBlockTrace(blockToProduce);
+            txExecutor.SetBlockExecutionContext(new BlockExecutionContext(blockToProduce.Header, Amsterdam.Instance));
+            txExecutor.ProcessTransactions(blockToProduce, ProcessingOptions.ProducingBlock, receiptsTracer);
+
+            Assert.That(blockToProduce.Transactions, Is.EqualTo(new[] { firstTx }));
+            Assert.That(receiptsTracer.TxReceipts.Length, Is.EqualTo(1));
+            Assert.That(blockToProduce.Header.GasUsed, Is.EqualTo(GasCostOf.Transaction));
+            Assert.That(stateProvider.GetNonce(TestItem.AddressA), Is.EqualTo((UInt256)1));
+        }
+
         private static Transaction[] RunBlockProduction(
             ITransactionProcessorAdapter transactionProcessor,
             IWorldState stateProvider,

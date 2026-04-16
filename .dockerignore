@@ -1,7 +1,11 @@
 **/.idea/
 **/.vs/
 **/.vscode/
+**/.git/
 **/artifacts/
 **/bin/
 **/obj/
-
+_tmp*/
+_tmp*
+block_*.rlp
+receipts_*.txt

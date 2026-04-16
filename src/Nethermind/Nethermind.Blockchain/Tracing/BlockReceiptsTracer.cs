@@ -262,6 +262,7 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
         // Restore receipt gas from remaining receipts (post-refund)
         _cumulativeReceiptGas = _txReceipts.Count > 0 ? _txReceipts[^1].GasUsedTotal : 0;
         Block.Header.ReceiptGasUsed = _cumulativeReceiptGas;
+        _currentIndex = snapshot;
     }
 
     public void ReportReward(Address author, string rewardType, UInt256 rewardValue) =>

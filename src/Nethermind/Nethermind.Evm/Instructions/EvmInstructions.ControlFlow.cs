@@ -224,6 +224,7 @@ internal static partial class EvmInstructions
         // Charge gas for account access; if insufficient, signal out-of-gas.
         if (!TGasPolicy.ConsumeAccountAccessGas(ref gas, spec, in vmState.AccessTracker, vm.TxTracer.IsTracingAccess, inheritor, false))
             goto OutOfGas;
+        state.AddAccountRead(inheritor);
 
         Address executingAccount = vmState.Env.ExecutingAccount;
         bool createInSameTx = vmState.AccessTracker.CreateList.Contains(executingAccount);

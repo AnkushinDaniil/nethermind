@@ -61,7 +61,8 @@ namespace Nethermind.Consensus.Processing
                     return args.Set(TxAction.Skip, "Null sender");
                 }
 
-                if (currentTx.GasLimit > gasRemaining)
+                IReleaseSpec spec = _specProvider.GetSpec(block.Header);
+                if (!spec.IsEip8037Enabled && currentTx.GasLimit > gasRemaining)
                 {
                     return args.Set(TxAction.Skip, $"Not enough gas in block, gas limit {currentTx.GasLimit} > {gasRemaining}");
                 }
@@ -71,7 +72,6 @@ namespace Nethermind.Consensus.Processing
                     return args.Set(TxAction.Skip, "Transaction already in block");
                 }
 
-                IReleaseSpec spec = _specProvider.GetSpec(block.Header);
                 if (currentTx.IsAboveInitCode(spec))
                 {
                     return args.Set(TxAction.Skip, TransactionResult.TransactionSizeOverMaxInitCodeSize.ErrorDescription);

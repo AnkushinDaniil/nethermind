@@ -40,7 +40,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
     {
         _innerWorldState.AddToBalance(address, balanceChange, spec, out oldBalance);
 
-        if (TracingEnabled)
+        if (TracingEnabled && !balanceChange.IsZero)
         {
             UInt256 newBalance = oldBalance + balanceChange;
             GeneratedBlockAccessList.AddBalanceChange(address, oldBalance, newBalance);
@@ -49,9 +49,14 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public override bool AddToBalanceAndCreateIfNotExists(Address address, in UInt256 balanceChange, IReleaseSpec spec, out UInt256 oldBalance)
     {
+        if (balanceChange.IsZero)
+        {
+            AddAccountRead(address);
+        }
+
         bool res = _innerWorldState.AddToBalanceAndCreateIfNotExists(address, balanceChange, spec, out oldBalance);
 
-        if (TracingEnabled)
+        if (TracingEnabled && !balanceChange.IsZero)
         {
             UInt256 newBalance = oldBalance + balanceChange;
             GeneratedBlockAccessList.AddBalanceChange(address, oldBalance, newBalance);
@@ -65,11 +70,14 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public override ReadOnlySpan<byte> Get(in StorageCell storageCell)
     {
-        if (TracingEnabled)
-        {
-            GeneratedBlockAccessList.AddStorageRead(storageCell);
-        }
+        AddStorageRead(storageCell);
         return _innerWorldState.Get(storageCell);
+    }
+
+    public override byte[] GetOriginal(in StorageCell storageCell)
+    {
+        AddStorageRead(storageCell);
+        return _innerWorldState.GetOriginal(storageCell);
     }
 
     public override void IncrementNonce(Address address, UInt256 delta, out UInt256 oldNonce)
@@ -114,32 +122,32 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public override ref readonly UInt256 GetBalance(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return ref _innerWorldState.GetBalance(address);
     }
 
     public UInt256 GetNonce(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.GetNonce(address);
     }
 
     public bool HasCode(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.HasCode(address);
     }
 
 
     public override ref readonly ValueHash256 GetCodeHash(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return ref _innerWorldState.GetCodeHash(address);
     }
 
     public override byte[]? GetCode(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.GetCode(address);
     }
 
@@ -147,7 +155,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
     {
         _innerWorldState.SubtractFromBalance(address, balanceChange, spec, out oldBalance);
 
-        if (TracingEnabled)
+        if (TracingEnabled && !balanceChange.IsZero)
         {
             UInt256 newBalance = oldBalance - balanceChange;
             GeneratedBlockAccessList.AddBalanceChange(address, oldBalance, newBalance);
@@ -167,7 +175,6 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
     {
         if (TracingEnabled)
         {
-            GeneratedBlockAccessList.AddAccountRead(address);
             if (!balance.IsZero)
             {
                 GeneratedBlockAccessList.AddBalanceChange(address, 0, balance);
@@ -190,16 +197,28 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public override bool TryGetAccount(Address address, out AccountStruct account)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.TryGetAccount(address, out account);
     }
 
     public void AddAccountRead(Address address)
     {
-        if (TracingEnabled)
+        if (TracingEnabled && address != Address.SystemUser)
         {
             GeneratedBlockAccessList.AddAccountRead(address);
         }
+    }
+
+    public void AddStorageRead(in StorageCell storageCell)
+    {
+        if (TracingEnabled)
+        {
+            GeneratedBlockAccessList.AddStorageRead(storageCell);
+        }
+    }
+
+    private void AddTransientAccountRead(Address address)
+    {
     }
 
     public override void Restore(Snapshot snapshot)
@@ -220,25 +239,25 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
 
     public override bool AccountExists(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.AccountExists(address);
     }
 
     public override bool IsContract(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.IsContract(address);
     }
 
     public override bool IsDeadAccount(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         return _innerWorldState.IsDeadAccount(address);
     }
 
     public override void ClearStorage(Address address)
     {
-        AddAccountRead(address);
+        AddTransientAccountRead(address);
         _innerWorldState.ClearStorage(address);
     }
 
@@ -280,7 +299,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
         {
             if (suggestedHead is null)
             {
-                if (HasNoChanges(generatedHead.Value))
+                if (HasOptionalStorageReads(generatedHead.Value))
                 {
                     AdvanceGenerated();
                     continue;
@@ -289,7 +308,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
             }
             else if (generatedHead is null)
             {
-                if (HasNoChanges(suggestedHead.Value))
+                if (HasIgnorableSuggestedRead(suggestedHead.Value, index))
                 {
                     AdvanceSuggested();
                     continue;
@@ -311,7 +330,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
             }
             else if (cmp > 0)
             {
-                if (HasNoChanges(suggestedHead.Value))
+                if (HasIgnorableSuggestedRead(suggestedHead.Value, index))
                 {
                     AdvanceSuggested();
                     continue;
@@ -320,7 +339,7 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
             }
             else
             {
-                if (HasNoChanges(generatedHead.Value))
+                if (HasOptionalStorageReads(generatedHead.Value))
                 {
                     AdvanceGenerated();
                     continue;
@@ -338,10 +357,11 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
         }
     }
 
-    public void SetBlockAccessList(Block block, IReleaseSpec spec)
+    public void SetBlockAccessList(Block block, IReleaseSpec spec, bool forceGenerated = false)
     {
         if (!spec.BlockLevelAccessListsEnabled)
         {
+            TracingEnabled = false;
             return;
         }
 
@@ -351,10 +371,23 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
         }
         else
         {
-            block.GeneratedBlockAccessList = GeneratedBlockAccessList;
-            block.EncodedBlockAccessList = Rlp.Encode(GeneratedBlockAccessList).Bytes;
+            if (forceGenerated || block.BlockAccessList is null)
+            {
+                GeneratedBlockAccessList.PruneEmptyNonReadAccounts();
+                block.BlockAccessList = GeneratedBlockAccessList;
+                block.GeneratedBlockAccessList = GeneratedBlockAccessList;
+                block.EncodedBlockAccessList = Rlp.Encode(GeneratedBlockAccessList).Bytes;
+            }
+            else
+            {
+                block.GeneratedBlockAccessList = GeneratedBlockAccessList;
+                block.EncodedBlockAccessList ??= Rlp.Encode(block.BlockAccessList).Bytes;
+            }
+
             block.Header.BlockAccessListHash = new(ValueKeccak.Compute(block.EncodedBlockAccessList).Bytes);
         }
+
+        TracingEnabled = false;
     }
 
     // for testing
@@ -366,4 +399,19 @@ public class ParallelWorldState(IWorldState innerWorldState) : WrappedWorldState
             c.NonceChange is null &&
             c.CodeChange is null &&
             !c.SlotChanges.GetEnumerator().MoveNext();
+
+    private static bool HasOptionalStorageReads(in ChangeAtIndex c)
+        => HasNoChanges(c) && c.Reads > 0;
+
+    private static bool HasAccountOnlyRead(in ChangeAtIndex c)
+        => HasNoChanges(c) && c.Reads == 0;
+
+    private static bool HasIgnorableSuggestedRead(in ChangeAtIndex c, ushort index)
+        => HasOptionalStorageReads(c) ||
+            HasAccountOnlyRead(c) ||
+            (HasNoChanges(c) && IsPostExecutionSystemContract(c.Address));
+
+    private static bool IsPostExecutionSystemContract(Address address)
+        => address == Eip7002Constants.WithdrawalRequestPredeployAddress ||
+            address == Eip7251Constants.ConsolidationRequestPredeployAddress;
 }

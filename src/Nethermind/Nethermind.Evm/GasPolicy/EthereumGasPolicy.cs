@@ -92,12 +92,10 @@ public struct EthereumGasPolicy : IGasPolicy<EthereumGasPolicy>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RestoreChildStateGas(ref EthereumGasPolicy parentGas, in EthereumGasPolicy childGas, long initialStateReservoir)
     {
-        // On halt/revert, restore the full initial reservoir that was transferred to the child,
-        // but keep the child's consumed state gas in block accounting. The state changes unwind,
-        // not the gas already spent to attempt them.
+        // On a child-frame error/revert, return the child's state gas to the parent reservoir.
+        // This mirrors geth's RefundGas path: errored child state gas is available to the
+        // parent frame again and is not merged into block state-gas accounting.
         parentGas.StateReservoir += initialStateReservoir + childGas.StateGasSpill;
-        parentGas.StateGasUsed += childGas.StateGasUsed;
-        parentGas.StateGasSpill += childGas.StateGasSpill;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -247,8 +245,12 @@ public struct EthereumGasPolicy : IGasPolicy<EthereumGasPolicy>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long ApplyCodeInsertRefunds(ref EthereumGasPolicy gas, int codeInsertRefunds, IReleaseSpec spec, long stateGasFloor)
     {
+        _ = stateGasFloor;
         if (codeInsertRefunds > 0 && spec.IsEip8037Enabled)
-            RefundStateGas(ref gas, GasCostOf.NewAccountState * codeInsertRefunds, stateGasFloor);
+        {
+            gas.StateReservoir += GasCostOf.NewAccountState * codeInsertRefunds;
+        }
+
         return GetCodeInsertRegularRefund(codeInsertRefunds, spec);
     }
 

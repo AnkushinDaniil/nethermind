@@ -9,6 +9,7 @@ using Nethermind.Blockchain.Tracing;
 using Nethermind.Consensus.Producers;
 using Nethermind.Core;
 using Nethermind.Core.Collections;
+using Nethermind.Core.Messages;
 using Nethermind.Evm;
 using Nethermind.Evm.State;
 using Nethermind.Evm.TransactionProcessing;
@@ -105,13 +106,26 @@ namespace Nethermind.Consensus.Processing
                 }
                 else
                 {
+                    int receiptsSnapshot = receiptsTracer.TakeSnapshot();
+                    Snapshot stateSnapshot = stateProvider.TakeSnapshot();
+
                     _balBuilder?.GeneratedBlockAccessList.IncrementBlockAccessIndex();
                     TransactionResult result = transactionProcessor.ProcessTransaction(currentTx, receiptsTracer, processingOptions, stateProvider);
 
                     if (result)
                     {
-                        _transactionProcessed?.Invoke(this,
-                            new TxProcessedEventArgs(index, currentTx, block.Header, receiptsTracer.TxReceipts[index]));
+                        if (block.Header.GasUsed > block.Header.GasLimit)
+                        {
+                            stateProvider.Restore(stateSnapshot);
+                            receiptsTracer.Restore(receiptsSnapshot);
+                            _balBuilder?.GeneratedBlockAccessList.RollbackCurrentIndex();
+                            args.Set(TxAction.Skip, BlockErrorMessages.ExceededGasLimit);
+                        }
+                        else
+                        {
+                            _transactionProcessed?.Invoke(this,
+                                new TxProcessedEventArgs(index, currentTx, block.Header, receiptsTracer.TxReceipts[index]));
+                        }
                     }
                     else
                     {

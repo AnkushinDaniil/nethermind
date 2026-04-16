@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using Nethermind.Blockchain;
 using Nethermind.Blockchain.Tracing;
 using Nethermind.Core.Test;
+using Nethermind.State;
 
 namespace Nethermind.Evm.Test;
 
@@ -239,6 +240,35 @@ public class TransactionProcessorTests(bool eip155Enabled)
 
         _transactionProcessor.CallAndRestore(tx, new BlockExecutionContext(block.Header, _specProvider.GetSpec(block.Header)), NullTxTracer.Instance);
         _stateProvider.GetNonce(TestItem.PrivateKeyA.Address).Should().Be(0);
+    }
+
+    [Test]
+    public void CallAndRestore_does_not_update_block_access_list_when_bal_tracing_enabled()
+    {
+        long gasLimit = 100000;
+        byte[] initByteCode = Prepare.EvmCode.ForInitOf(Prepare.EvmCode.Op(Instruction.STOP).Done).Done;
+        Address contractAddress = ContractAddress.From(TestItem.PrivateKeyA.Address, 0);
+        Transaction initTx = Build.A.Transaction.SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, eip155Enabled)
+            .WithCode(initByteCode)
+            .WithGasLimit(gasLimit)
+            .TestObject;
+        Block block = Build.A.Block.WithNumber(MainnetSpecProvider.ByzantiumBlockNumber).WithGasLimit(gasLimit * 2).TestObject;
+        var blkCtx = new BlockExecutionContext(block.Header, _specProvider.GetSpec(block.Header));
+        Execute(initTx, block);
+
+        Transaction tx = Build.A.Transaction.SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, eip155Enabled)
+            .WithTo(contractAddress)
+            .WithNonce(1)
+            .WithGasLimit(gasLimit)
+            .TestObject;
+        ParallelWorldState worldState = (ParallelWorldState)_stateProvider;
+        worldState.GeneratedBlockAccessList.Clear();
+        worldState.TracingEnabled = true;
+
+        _transactionProcessor.CallAndRestore(tx, blkCtx, NullTxTracer.Instance);
+
+        worldState.TracingEnabled.Should().BeTrue("CallAndRestore should restore BAL tracing for the caller");
+        worldState.GeneratedBlockAccessList.AccountChanges.Should().BeEmpty("CallAndRestore is a side execution and must not contribute to the block BAL");
     }
 
     [TestCase(true)]
@@ -738,5 +768,20 @@ public class TransactionProcessorTests(bool eip155Enabled)
         _transactionProcessor.Warmup(tx, new BlockExecutionContext(block.Header, _specProvider.GetSpec(block.Header)), NullTxTracer.Instance);
 
         _stateProvider.GetBalance(TestItem.AddressA).Should().Be(balanceBefore, "Warmup must not deduct sender balance (should use SystemTransactionProcessor path)");
+    }
+
+    [Test]
+    public void Warmup_does_not_update_block_access_list_when_bal_tracing_enabled()
+    {
+        Transaction tx = Build.A.Transaction.SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, eip155Enabled)
+            .WithGasLimit(100000).TestObject;
+        Block block = Build.A.Block.WithNumber(1).WithTransactions(tx).TestObject;
+        ParallelWorldState worldState = (ParallelWorldState)_stateProvider;
+        worldState.TracingEnabled = true;
+
+        _transactionProcessor.Warmup(tx, new BlockExecutionContext(block.Header, _specProvider.GetSpec(block.Header)), NullTxTracer.Instance);
+
+        worldState.TracingEnabled.Should().BeTrue("Warmup should restore BAL tracing for the caller");
+        worldState.GeneratedBlockAccessList.AccountChanges.Should().BeEmpty("Warmup is only cache population and must not contribute to the block BAL");
     }
 }

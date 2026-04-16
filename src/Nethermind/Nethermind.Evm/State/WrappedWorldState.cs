@@ -84,7 +84,7 @@ public class WrappedWorldState(IWorldState innerWorldState) : IWorldState
     public virtual ref readonly ValueHash256 GetCodeHash(Address address)
         => ref _innerWorldState.GetCodeHash(address);
 
-    public byte[] GetOriginal(in StorageCell storageCell)
+    public virtual byte[] GetOriginal(in StorageCell storageCell)
         => _innerWorldState.GetOriginal(storageCell);
 
     public ReadOnlySpan<byte> GetTransientState(in StorageCell storageCell)
