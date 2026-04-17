@@ -13,15 +13,25 @@ public class Eip8037Tests
 {
     private static IEnumerable<TestCaseData> ConstantsTestCases()
     {
-        yield return new TestCaseData(GasCostOf.CostPerStateByte).Returns(1174L).SetName("CostPerStateByte");
-        yield return new TestCaseData(GasCostOf.SSetState).Returns(37568L).SetName("SSetState");
-        yield return new TestCaseData(GasCostOf.CreateState).Returns(131488L).SetName("CreateState");
-        yield return new TestCaseData(GasCostOf.NewAccountState).Returns(131488L).SetName("NewAccountState");
-        yield return new TestCaseData(GasCostOf.PerAuthBaseState).Returns(27002L).SetName("PerAuthBaseState");
+        Eip8037GasCosts costs = Eip8037GasCosts.Default;
+        yield return new TestCaseData(costs.CostPerStateByte).Returns(1174L).SetName("CostPerStateByte");
+        yield return new TestCaseData(costs.SSetState).Returns(37568L).SetName("SSetState");
+        yield return new TestCaseData(costs.CreateState).Returns(131488L).SetName("CreateState");
+        yield return new TestCaseData(costs.NewAccountState).Returns(131488L).SetName("NewAccountState");
+        yield return new TestCaseData(costs.PerAuthBaseState).Returns(27002L).SetName("PerAuthBaseState");
     }
 
     [TestCaseSource(nameof(ConstantsTestCases))]
     public long Constants_are_calculated_correctly(long actual) => actual;
+
+    [TestCase(1, ExpectedResult = 1L)]
+    [TestCase(50_000_000, ExpectedResult = 150L)]
+    [TestCase(100_000_000, ExpectedResult = 1174L)]
+    [TestCase(150_000_000, ExpectedResult = 1686L)]
+    [TestCase(200_000_000, ExpectedResult = 2198L)]
+    [TestCase(1_000_000_000, ExpectedResult = 11926L)]
+    public long Cost_per_state_byte_is_derived_from_block_gas_limit(long blockGasLimit) =>
+        Eip8037GasCosts.CalculateCostPerStateByte(blockGasLimit);
 
     [TestCase(1, ExpectedResult = 6L)]
     [TestCase(32, ExpectedResult = 6L)]
@@ -39,6 +49,16 @@ public class Eip8037Tests
     {
         CodeDepositHandler.CalculateCost(Amsterdam.Instance, codeLength, out _, out long stateCost);
         return stateCost;
+    }
+
+    [Test]
+    public void Code_deposit_state_cost_uses_dynamic_cost_per_byte()
+    {
+        Eip8037GasCosts costs = Eip8037GasCosts.FromBlockGasLimit(150_000_000);
+
+        CodeDepositHandler.CalculateCost(Amsterdam.Instance, costs, 33, out _, out long stateCost);
+
+        Assert.That(stateCost, Is.EqualTo(33 * 1686L));
     }
 
     [Test]
@@ -88,19 +108,37 @@ public class Eip8037Tests
     [Test]
     public void Code_insert_state_refund_is_available_to_later_state_gas()
     {
-        const long intrinsicAuthState = GasCostOf.NewAccountState + GasCostOf.PerAuthBaseState;
+        Eip8037GasCosts costs = Eip8037GasCosts.Default;
+        long intrinsicAuthState = costs.NewAccountState + costs.PerAuthBaseState;
         EthereumGasPolicy gas = new()
         {
             StateGasUsed = intrinsicAuthState,
+            CostPerStateByte = costs.CostPerStateByte,
         };
 
         long regularRefund = EthereumGasPolicy.ApplyCodeInsertRefunds(ref gas, 1, Amsterdam.Instance, intrinsicAuthState);
-        EthereumGasPolicy.ConsumeStateGas(ref gas, GasCostOf.SSetState);
-        EthereumGasPolicy.ConsumeStateGas(ref gas, GasCostOf.SSetState);
+        EthereumGasPolicy.ConsumeStateGas(ref gas, costs.SSetState);
+        EthereumGasPolicy.ConsumeStateGas(ref gas, costs.SSetState);
 
         Assert.That(regularRefund, Is.Zero);
         Assert.That((gas.StateReservoir, gas.StateGasUsed),
-            Is.EqualTo((GasCostOf.NewAccountState - 2 * GasCostOf.SSetState, GasCostOf.PerAuthBaseState + 2 * GasCostOf.SSetState)));
+            Is.EqualTo((costs.NewAccountState - 2 * costs.SSetState, costs.PerAuthBaseState + 2 * costs.SSetState)));
+    }
+
+    [Test]
+    public void Dynamic_costs_are_carried_by_gas_policy()
+    {
+        Eip8037GasCosts costs = Eip8037GasCosts.FromBlockGasLimit(150_000_000);
+        EthereumGasPolicy gas = EthereumGasPolicy.WithEip8037GasCosts(EthereumGasPolicy.FromLong(500_000), costs);
+
+        bool consumed = EthereumGasPolicy.ConsumeNewAccountCreation<OnFlag>(ref gas);
+
+        Assert.That(consumed, Is.True);
+        Assert.That(gas.StateGasUsed, Is.EqualTo(costs.NewAccountState));
+        Assert.That(EthereumGasPolicy.GetEip8037GasCosts(in gas), Is.EqualTo(costs));
+
+        EthereumGasPolicy child = EthereumGasPolicy.CreateChildFrameGas(ref gas, 10_000);
+        Assert.That(EthereumGasPolicy.GetEip8037GasCosts(in child), Is.EqualTo(costs));
     }
 
     [Test]

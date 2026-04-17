@@ -18,6 +18,7 @@ public readonly struct BlockExecutionContext
     public readonly ulong GasLimit;
     public readonly ValueHash256 BlobBaseFee;
     public readonly IReleaseSpec Spec;
+    public readonly Eip8037GasCosts Eip8037GasCosts;
     public readonly ValueHash256 PrevRandao;
     public readonly bool IsGenesis;
 
@@ -52,6 +53,7 @@ public readonly struct BlockExecutionContext
         GasLimit = (ulong)blockHeader.GasLimit;
         BlobBaseFee = blobBaseFee.ToValueHash();
         Spec = spec;
+        Eip8037GasCosts = Nethermind.Core.Eip8037GasCosts.FromBlockGasLimit(blockHeader.GasLimit);
         PrevRandao = prevRandao;
         IsGenesis = blockHeader.IsGenesis;
     }

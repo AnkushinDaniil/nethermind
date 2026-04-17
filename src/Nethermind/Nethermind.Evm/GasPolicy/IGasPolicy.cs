@@ -62,6 +62,23 @@ public interface IGasPolicy<TSelf> where TSelf : struct, IGasPolicy<TSelf>
     static virtual long GetStateGasSpill(in TSelf gas) => 0;
 
     /// <summary>
+    /// Gets the EIP-8037 dynamic state gas costs carried by this gas state.
+    /// Policies that do not carry per-block costs use the default 100M block gas limit costs.
+    /// </summary>
+    /// <param name="gas">The gas state to query.</param>
+    /// <returns>The state gas cost table for EIP-8037 operations.</returns>
+    static virtual Eip8037GasCosts GetEip8037GasCosts(in TSelf gas) => Eip8037GasCosts.Default;
+
+    /// <summary>
+    /// Returns a gas state carrying the supplied EIP-8037 dynamic costs.
+    /// Policies that do not store per-block costs return the gas state unchanged.
+    /// </summary>
+    /// <param name="gas">The gas state to update.</param>
+    /// <param name="eip8037GasCosts">The dynamic EIP-8037 state gas costs for the block.</param>
+    /// <returns>The updated gas state.</returns>
+    static virtual TSelf WithEip8037GasCosts(TSelf gas, Eip8037GasCosts eip8037GasCosts) => gas;
+
+    /// <summary>
     /// Consume gas for an EVM operation.
     /// </summary>
     /// <param name="gas">The gas state to update.</param>
@@ -310,7 +327,10 @@ public interface IGasPolicy<TSelf> where TSelf : struct, IGasPolicy<TSelf>
     /// <param name="tx">The transaction to calculate intrinsic gas for.</param>
     /// <param name="spec">The release specification governing gas costs.</param>
     /// <returns>The intrinsic gas as TGasPolicy.</returns>
-    static abstract IntrinsicGas<TSelf> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec);
+    static abstract IntrinsicGas<TSelf> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts);
+
+    static virtual IntrinsicGas<TSelf> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec) =>
+        TSelf.CalculateIntrinsicGas(tx, spec, Eip8037GasCosts.Default);
 
     /// <summary>
     /// Creates available gas from gas limit minus intrinsic gas, preserving any tracking data.
@@ -388,7 +408,10 @@ public interface IGasPolicy<TSelf> where TSelf : struct, IGasPolicy<TSelf>
             throw new InvalidDataException($"Transaction with an access list received within the context of {spec.Name}. EIP-2930 is not enabled.");
     }
 
-    public static (long RegularCost, long StateCost) AuthorizationListCost(Transaction transaction, IReleaseSpec spec)
+    public static (long RegularCost, long StateCost) AuthorizationListCost(Transaction transaction, IReleaseSpec spec) =>
+        AuthorizationListCost(transaction, spec, Eip8037GasCosts.Default);
+
+    public static (long RegularCost, long StateCost) AuthorizationListCost(Transaction transaction, IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts)
     {
         AuthorizationTuple[]? authList = transaction.AuthorizationList;
         if (authList is null)
@@ -405,7 +428,7 @@ public interface IGasPolicy<TSelf> where TSelf : struct, IGasPolicy<TSelf>
         return spec.IsEip8037Enabled
             ? (
                 authCount * GasCostOf.PerAuthBaseRegular,
-                authCount * (GasCostOf.NewAccountState + GasCostOf.PerAuthBaseState)
+                authCount * (eip8037GasCosts.NewAccountState + eip8037GasCosts.PerAuthBaseState)
             )
             : (authCount * GasCostOf.NewAccount, 0);
 

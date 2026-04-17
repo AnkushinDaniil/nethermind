@@ -549,7 +549,8 @@ public static partial class EvmInstructions
                 bool newSameAsOriginal = Bytes.AreEqual(originalValue, bytes);
                 if (newSameAsOriginal)
                 {
-                    long refundFromReversal = gasCosts.RefundFromReversal<TEip8037>(originalIsZero);
+                    Eip8037GasCosts eip8037GasCosts = TGasPolicy.GetEip8037GasCosts(in gas);
+                    long refundFromReversal = gasCosts.RefundFromReversal<TEip8037>(originalIsZero, eip8037GasCosts);
 
                     vmState.Refund += refundFromReversal;
                     if (vm.TxTracer.IsTracingRefunds)

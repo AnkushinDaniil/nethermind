@@ -235,9 +235,10 @@ namespace Nethermind.Evm.Test
                 .WithAuthorizationCode(new AuthorizationTuple(1, TestItem.AddressF, 0, 0, UInt256.One, UInt256.One))
                 .TestObject;
             IntrinsicGas<EthereumGasPolicy> intrinsicGas = EthereumGasPolicy.CalculateIntrinsicGas(tx, Amsterdam.Instance);
+            Eip8037GasCosts defaultCosts = Eip8037GasCosts.Default;
 
             Assert.That(intrinsicGas.Standard.Value, Is.EqualTo(GasCostOf.Transaction + GasCostOf.PerAuthBaseRegular));
-            Assert.That(intrinsicGas.Standard.StateReservoir, Is.EqualTo(GasCostOf.NewAccountState + GasCostOf.PerAuthBaseState));
+            Assert.That(intrinsicGas.Standard.StateReservoir, Is.EqualTo(defaultCosts.NewAccountState + defaultCosts.PerAuthBaseState));
         }
 
         [Test]
@@ -247,9 +248,10 @@ namespace Nethermind.Evm.Test
                 .WithCode(Array.Empty<byte>())
                 .TestObject;
             EthereumIntrinsicGas gas = IntrinsicGasCalculator.Calculate(tx, Amsterdam.Instance);
+            Eip8037GasCosts defaultCosts = Eip8037GasCosts.Default;
 
             long expectedRegular = GasCostOf.Transaction + GasCostOf.CreateRegular;
-            long expectedState = GasCostOf.CreateState;
+            long expectedState = defaultCosts.CreateState;
             Assert.That(gas.Standard, Is.EqualTo(expectedRegular + expectedState));
             Assert.That(gas.MinimalGas, Is.EqualTo(Math.Max(gas.Standard, gas.FloorGas)));
         }
@@ -261,9 +263,10 @@ namespace Nethermind.Evm.Test
                 .WithAuthorizationCode(new AuthorizationTuple(1, TestItem.AddressF, 0, 0, UInt256.One, UInt256.One))
                 .TestObject;
             EthereumIntrinsicGas gas = IntrinsicGasCalculator.Calculate(tx, Amsterdam.Instance);
+            Eip8037GasCosts defaultCosts = Eip8037GasCosts.Default;
 
             long expectedRegular = GasCostOf.Transaction + GasCostOf.PerAuthBaseRegular;
-            long expectedState = GasCostOf.NewAccountState + GasCostOf.PerAuthBaseState;
+            long expectedState = defaultCosts.NewAccountState + defaultCosts.PerAuthBaseState;
             Assert.That(gas.Standard, Is.EqualTo(expectedRegular + expectedState));
         }
 
@@ -275,8 +278,9 @@ namespace Nethermind.Evm.Test
                 .WithCode(Array.Empty<byte>())
                 .TestObject;
             EthereumIntrinsicGas gas = IntrinsicGasCalculator.Calculate(tx, Amsterdam.Instance);
+            Eip8037GasCosts defaultCosts = Eip8037GasCosts.Default;
 
-            long regularPlusState = GasCostOf.Transaction + GasCostOf.CreateRegular + GasCostOf.CreateState;
+            long regularPlusState = GasCostOf.Transaction + GasCostOf.CreateRegular + defaultCosts.CreateState;
             Assert.That(gas.MinimalGas, Is.GreaterThanOrEqualTo(regularPlusState));
         }
     }

@@ -12,11 +12,17 @@ namespace Nethermind.Evm
         private const byte InvalidStartingCodeByte = 0xEF;
 
         public static long CalculateCost(IReleaseSpec spec, int byteCodeLength) =>
-            CalculateCost(spec, byteCodeLength, out long regularCost, out long stateCost)
+            CalculateCost(spec, Eip8037GasCosts.Default, byteCodeLength);
+
+        public static long CalculateCost(IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts, int byteCodeLength) =>
+            CalculateCost(spec, eip8037GasCosts, byteCodeLength, out long regularCost, out long stateCost)
                 ? regularCost + stateCost
                 : long.MaxValue;
 
         public static bool CalculateCost(IReleaseSpec spec, int byteCodeLength, out long regularCost, out long stateCost)
+            => CalculateCost(spec, Eip8037GasCosts.Default, byteCodeLength, out regularCost, out stateCost);
+
+        public static bool CalculateCost(IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts, int byteCodeLength, out long regularCost, out long stateCost)
         {
             stateCost = 0;
 
@@ -41,7 +47,7 @@ namespace Nethermind.Evm
             }
 
             regularCost = GasCostOf.CodeDepositRegularPerWord * words;
-            stateCost = GasCostOf.CodeDepositState * byteCodeLength;
+            stateCost = eip8037GasCosts.CodeDepositState * byteCodeLength;
             return true;
         }
 

@@ -246,7 +246,8 @@ public static partial class EvmInstructions
             false => !inheritorAccountExists && spec.UseShanghaiDDosProtection,
         };
 
-        bool outOfGas = chargesNewAccount && !(TGasPolicy.ConsumeNewAccountCreation<TEip8037>(ref gas));
+        bool outOfGas = chargesNewAccount &&
+            !(TGasPolicy.ConsumeNewAccountCreation<TEip8037>(ref gas));
 
         if (outOfGas) goto OutOfGas;
 

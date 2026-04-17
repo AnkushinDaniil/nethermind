@@ -193,7 +193,8 @@ namespace Nethermind.Evm.TransactionProcessing
             bool commit = opts.HasFlag(ExecutionOptions.Commit) || (!opts.HasFlag(ExecutionOptions.SkipValidation) && !spec.IsEip658Enabled);
 
             TransactionResult result;
-            IntrinsicGas<TGasPolicy> intrinsicGas = CalculateIntrinsicGas(tx, spec);
+            Eip8037GasCosts eip8037GasCosts = VirtualMachine.BlockExecutionContext.Eip8037GasCosts;
+            IntrinsicGas<TGasPolicy> intrinsicGas = CalculateIntrinsicGas(tx, spec, eip8037GasCosts);
             if (!(result = ValidateStatic(tx, header, spec, opts, in intrinsicGas))) return result;
 
             UInt256 effectiveGasPrice = CalculateEffectiveGasPrice(tx, spec.IsEip1559Enabled, header.BaseFeePerGas, out UInt256 opcodeGasPrice);
@@ -559,8 +560,8 @@ namespace Nethermind.Evm.TransactionProcessing
             return deleteCallerAccount;
         }
 
-        protected virtual IntrinsicGas<TGasPolicy> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec)
-            => TGasPolicy.CalculateIntrinsicGas(tx, spec);
+        protected virtual IntrinsicGas<TGasPolicy> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts)
+            => TGasPolicy.CalculateIntrinsicGas(tx, spec, eip8037GasCosts);
 
         protected virtual UInt256 CalculateEffectiveGasPrice(Transaction tx, bool eip1559Enabled, in UInt256 baseFee, out UInt256 opcodeGasPrice)
         {
@@ -882,7 +883,8 @@ namespace Nethermind.Evm.TransactionProcessing
 
         protected virtual bool DeployContract(IReleaseSpec spec, Address codeOwner, in TransactionSubstate substate, in StackAccessTracker accessedItems, ref TGasPolicy unspentGas)
         {
-            if (!CodeDepositHandler.CalculateCost(spec, substate.Output.Length, out long regularDepositCost, out long stateDepositCost))
+            Eip8037GasCosts eip8037GasCosts = TGasPolicy.GetEip8037GasCosts(in unspentGas);
+            if (!CodeDepositHandler.CalculateCost(spec, eip8037GasCosts, substate.Output.Length, out long regularDepositCost, out long stateDepositCost))
                 return false;
 
             if (CodeDepositHandler.CodeIsInvalid(spec, substate.Output))

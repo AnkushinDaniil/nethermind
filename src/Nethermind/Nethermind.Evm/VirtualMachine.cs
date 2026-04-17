@@ -381,7 +381,8 @@ public unsafe partial class VirtualMachine<TGasPolicy>(
         ref bool previousStateSucceeded)
     {
         IReleaseSpec spec = BlockExecutionContext.Spec;
-        if (!CodeDepositHandler.CalculateCost(spec, callResult.Output.Length, out long regularDepositCost, out long stateDepositCost))
+        Eip8037GasCosts eip8037GasCosts = TGasPolicy.GetEip8037GasCosts(in _currentState.Gas);
+        if (!CodeDepositHandler.CalculateCost(spec, eip8037GasCosts, callResult.Output.Length, out long regularDepositCost, out long stateDepositCost))
         {
             regularDepositCost = long.MaxValue;
             stateDepositCost = long.MaxValue;
@@ -792,7 +793,8 @@ public unsafe partial class VirtualMachine<TGasPolicy>(
     {
         IReleaseSpec spec = BlockExecutionContext.Spec;
         // Calculate the gas cost required for depositing the contract code based on the length of the output.
-        long codeDepositGasCost = CodeDepositHandler.CalculateCost(spec, callResult.Output.Length);
+        Eip8037GasCosts eip8037GasCosts = TGasPolicy.GetEip8037GasCosts(in currentState.Gas);
+        long codeDepositGasCost = CodeDepositHandler.CalculateCost(spec, eip8037GasCosts, callResult.Output.Length);
 
         // Cache the output bytes for reuse in the tracing reports.
         ReadOnlyMemory<byte> outputBytes = callResult.Output;

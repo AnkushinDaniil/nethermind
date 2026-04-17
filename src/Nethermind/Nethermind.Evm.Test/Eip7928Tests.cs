@@ -67,7 +67,9 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             .WithGasLimit(gasLimit)
             .WithValue(value)
             .SignedAndResolved(_ecdsa, TestItem.PrivateKeyA).TestObject;
-        Block block = Build.A.Block.TestObject;
+        Block block = Build.A.Block
+            .WithGasLimit(Eip8037GasCosts.DefaultBlockGasLimit)
+            .TestObject;
 
         _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
         CallOutputTracer callOutputTracer = new();
@@ -126,7 +128,9 @@ public class Eip7928Tests() : VirtualMachineTestsBase
             .WithGasLimit(gasLimit)
             .WithValue(_testAccountBalance)
             .SignedAndResolved(_ecdsa, TestItem.PrivateKeyA).TestObject;
-        Block block = Build.A.Block.TestObject;
+        Block block = Build.A.Block
+            .WithGasLimit(Eip8037GasCosts.DefaultBlockGasLimit)
+            .TestObject;
 
         _processor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, Amsterdam.Instance));
         CallOutputTracer callOutputTracer = new();

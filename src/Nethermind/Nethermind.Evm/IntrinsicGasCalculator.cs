@@ -24,15 +24,21 @@ public static class IntrinsicGasCalculator
     /// <summary>
     /// Calculates intrinsic gas with TGasPolicy type, allowing MultiGas breakdown for Arbitrum.
     /// </summary>
-    private static IntrinsicGas<TGasPolicy> Calculate<TGasPolicy>(Transaction transaction, IReleaseSpec releaseSpec)
+    private static IntrinsicGas<TGasPolicy> Calculate<TGasPolicy>(Transaction transaction, IReleaseSpec releaseSpec, Eip8037GasCosts eip8037GasCosts)
         where TGasPolicy : struct, IGasPolicy<TGasPolicy> =>
-        TGasPolicy.CalculateIntrinsicGas(transaction, releaseSpec);
+        TGasPolicy.CalculateIntrinsicGas(transaction, releaseSpec, eip8037GasCosts);
 
     /// <summary>
     /// Non-generic backward-compatible Calculate method.
     /// </summary>
     public static EthereumIntrinsicGas Calculate(Transaction transaction, IReleaseSpec releaseSpec) =>
-        Calculate<EthereumGasPolicy>(transaction, releaseSpec);
+        Calculate(transaction, releaseSpec, Eip8037GasCosts.Default);
+
+    public static EthereumIntrinsicGas Calculate(Transaction transaction, IReleaseSpec releaseSpec, long blockGasLimit) =>
+        Calculate(transaction, releaseSpec, Eip8037GasCosts.FromBlockGasLimit(blockGasLimit));
+
+    public static EthereumIntrinsicGas Calculate(Transaction transaction, IReleaseSpec releaseSpec, Eip8037GasCosts eip8037GasCosts) =>
+        Calculate<EthereumGasPolicy>(transaction, releaseSpec, eip8037GasCosts);
 
     public static long AccessListCost(Transaction transaction, IReleaseSpec releaseSpec) =>
         IGasPolicy<EthereumGasPolicy>.AccessListCost(transaction, releaseSpec);

@@ -169,10 +169,10 @@ internal class XdcTransactionProcessor(
         return base.CalculateEffectiveGasPrice(tx, eip1559Enabled, in baseFee, out opcodeGasPrice);
     }
 
-    protected override IntrinsicGas<EthereumGasPolicy> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec) =>
+    protected override IntrinsicGas<EthereumGasPolicy> CalculateIntrinsicGas(Transaction tx, IReleaseSpec spec, Eip8037GasCosts eip8037GasCosts) =>
         tx.RequiresSpecialHandling((IXdcReleaseSpec)spec)
             ? new IntrinsicGas<EthereumGasPolicy>()
-            : base.CalculateIntrinsicGas(tx, spec);
+            : base.CalculateIntrinsicGas(tx, spec, eip8037GasCosts);
 
     private TransactionResult ExecuteSpecialTransaction(Transaction tx, ITxTracer tracer, ExecutionOptions opts)
     {
@@ -184,7 +184,7 @@ internal class XdcTransactionProcessor(
         // maybe a better approach would be adding an XdcGasPolicy
         TransactionResult result;
         _ = RecoverSenderIfNeeded(tx, spec, opts, UInt256.Zero);
-        IntrinsicGas<EthereumGasPolicy> intrinsicGas = CalculateIntrinsicGas(tx, spec);
+        IntrinsicGas<EthereumGasPolicy> intrinsicGas = CalculateIntrinsicGas(tx, spec, VirtualMachine.BlockExecutionContext.Eip8037GasCosts);
 
         if (!(result = ValidateSender(tx, header, spec, tracer, opts))
             || !(result = IncrementNonce(tx, header, spec, tracer, opts))

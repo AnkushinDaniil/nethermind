@@ -82,11 +82,12 @@ public static partial class EvmInstructions
 
         // Obtain the current EVM specification and check if the call is static (static calls cannot create contracts).
         IReleaseSpec spec = vm.Spec;
+        Eip8037GasCosts eip8037GasCosts = TGasPolicy.GetEip8037GasCosts(in gas);
         if (vm.VmState.IsStatic)
         {
             if (TEip8037.IsActive)
             {
-                if (!TGasPolicy.UpdateGas(ref gas, GasCostOf.CreateState))
+                if (!TGasPolicy.UpdateGas(ref gas, eip8037GasCosts.CreateState))
                     goto OutOfGas;
             }
             goto StaticCallViolation;
@@ -119,7 +120,7 @@ public static partial class EvmInstructions
             {
                 if (TEip8037.IsActive)
                 {
-                    if (!TGasPolicy.UpdateGas(ref gas, GasCostOf.CreateState))
+                    if (!TGasPolicy.UpdateGas(ref gas, eip8037GasCosts.CreateState))
                         goto OutOfGas;
                 }
                 goto OutOfGas;
@@ -155,7 +156,7 @@ public static partial class EvmInstructions
         if (!vm.VmState.Memory.TryLoad(in memoryPositionOfInitCode, in initCodeLength, out ReadOnlyMemory<byte> initCode))
             goto OutOfGas;
 
-        if (TEip8037.IsActive && !TGasPolicy.ConsumeStateGas(ref gas, GasCostOf.CreateState))
+        if (TEip8037.IsActive && !TGasPolicy.ConsumeStateGas(ref gas, eip8037GasCosts.CreateState))
             goto OutOfGas;
 
         // Check that the executing account has sufficient balance to transfer the specified value.
