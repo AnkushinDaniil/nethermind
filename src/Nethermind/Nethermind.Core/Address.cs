@@ -35,9 +35,9 @@ namespace Nethermind.Core
 
         public byte[] Bytes { get; }
 
-        public Address(Hash256 hash) : this(hash.Bytes.Slice(12, Size).ToArray()) { }
+        public Address(Hash256 hash) : this(hash.Bytes.Slice(12, Size)) { }
 
-        public Address(in ValueHash256 hash) : this(hash.BytesAsSpan.Slice(12, Size).ToArray()) { }
+        public Address(in ValueHash256 hash) : this(hash.BytesAsSpan.Slice(12, Size)) { }
 
         public byte this[int index] => Bytes[index];
 
@@ -399,6 +399,6 @@ namespace Nethermind.Core
 
         public static bool operator !=(AddressStructRef a, AddressStructRef b) => !(a == b);
 
-        public readonly Address ToAddress() => new(Bytes.ToArray());
+        public readonly Address ToAddress() => new(Bytes);
     }
 }
