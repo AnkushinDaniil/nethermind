@@ -98,10 +98,12 @@ public class PersistedSnapshotCompactor(
         ArenaReservation reservation;
         long estimatedSize = 0;
         long bloomCapacity = 0;
+        PersistedSnapshotBloomFilterManager bloomManager = persistedSnapshotRepository.BloomManager;
         for (int i = 0; i < snapshots.Count; i++)
         {
             estimatedSize += snapshots[i].Size;
-            bloomCapacity += snapshots[i].KeyBloomCount;
+            using PersistedSnapshotBloom srcBloom = bloomManager.LeaseOrSentinel(snapshots[i].To);
+            bloomCapacity += srcBloom.KeyBloomCount;
         }
 
         const long MaxCompactedSourceBytes = 2L * 1024 * 1024 * 1024;
@@ -159,8 +161,6 @@ public class PersistedSnapshotCompactor(
         Metrics.PersistedSnapshotCount = persistedSnapshotRepository.SnapshotCount;
         Metrics.PersistedSnapshotMemory = persistedSnapshotRepository.BaseSnapshotMemory;
         Metrics.CompactedPersistedSnapshotMemory = persistedSnapshotRepository.CompactedSnapshotMemory;
-        Metrics.PersistedSnapshotKeyBloomMemory = persistedSnapshotRepository.KeyBloomMemory;
-        Metrics.PersistedSnapshotTrieBloomMemory = persistedSnapshotRepository.TrieBloomMemory;
         Metrics.ArenaFileCount = persistedSnapshotRepository.ArenaFileCount;
         Metrics.ArenaMappedBytes = persistedSnapshotRepository.ArenaMappedBytes;
         return true;
