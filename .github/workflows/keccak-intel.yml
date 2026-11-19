@@ -1,0 +1,56 @@
+name: keccak-intel-avx512
+
+on:
+  push:
+    branches: [keccak-intel-bench]
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    env:
+      BASE: c11be37bee5ef7ed921d1ed9325ff81306f91e48
+      HEAD: c77a3348fee8636043d58d547895b677193a7cbd
+      FILTER: "*Keccak256Benchmarks.ValueKeccak*"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: CPU
+        id: cpu
+        run: |
+          model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2- | xargs)
+          echo "$model" | tee cpu.txt
+          grep -m1 flags /proc/cpuinfo | tr ' ' '\n' | grep -E '^avx512' | tr '\n' ' ' | tee -a cpu.txt
+          if grep -q GenuineIntel /proc/cpuinfo && grep -qw avx512vl /proc/cpuinfo; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "ok=0" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v6
+        if: steps.cpu.outputs.ok == '1'
+        with: { repository: NethermindEth/nethermind, ref: "${{ env.BASE }}", path: base, persist-credentials: false }
+      - uses: actions/checkout@v6
+        if: steps.cpu.outputs.ok == '1'
+        with: { repository: NethermindEth/nethermind, ref: "${{ env.HEAD }}", path: head, persist-credentials: false }
+      - uses: actions/setup-dotnet@v5
+        if: steps.cpu.outputs.ok == '1'
+        with: { global-json-file: head/global.json }
+      - name: Run interleaved
+        if: steps.cpu.outputs.ok == '1'
+        run: |
+          for round in 1 2; do
+            for side in base head; do
+              (cd $side/src/Nethermind/Nethermind.Benchmark.Runner && \
+                dotnet run -c Release -- --filter "$FILTER" --join --buildTimeout 900 --artifacts "$RUNNER_TEMP/out/$side-r$round")
+            done
+          done
+          cp cpu.txt "$RUNNER_TEMP/out/"
+      - uses: actions/upload-artifact@v7
+        if: steps.cpu.outputs.ok == '1'
+        with:
+          name: intel-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/out
+          retention-days: 14
